@@ -1,8 +1,12 @@
+/**
+ * Time-window aggregation of CNS/NRB events per decom site (facts only).
+ * Used to feed the LLM; flagging is decided by the model, not by thresholds here.
+ */
 import { addDays } from "date-fns";
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 import type {
-  AnalyzeResponse,
   AppliedConfig,
+  AnalyzeSummary,
   CnsEventRow,
   ShutdownRow,
   SiteAnalysisRow,
@@ -12,18 +16,12 @@ import type {
 const DEFAULT_TZ = "America/New_York";
 const MAX_EVENTS_PER_SITE = 500;
 
-export type AnalyzeParams = {
+export type AggregateParams = {
   shutdowns: ShutdownRow[];
   events: CnsEventRow[];
   timeZone?: string;
   preDays: number;
   postDays: number;
-  /** Minimum post-window total when preTotal > 0 */
-  minPostWhenPrePositive: number;
-  /** Ratio post/pre required when preTotal > 0 */
-  minRatioWhenPrePositive: number;
-  /** Minimum post-window total when preTotal === 0 */
-  minPostWhenPreZero: number;
   analysisRunDate: Date;
 };
 
@@ -57,34 +55,14 @@ function eventInPostWindow(
   return eventYmd >= shutdownYmd && eventYmd <= postEndYmd;
 }
 
-function computeFlag(
-  preTotal: number,
-  postTotal: number,
-  p: AnalyzeParams
-): { flagged: boolean; reason: string | null } {
-  if (preTotal > 0) {
-    const ratio = postTotal / preTotal;
-    if (
-      postTotal >= p.minPostWhenPrePositive &&
-      ratio >= p.minRatioWhenPrePositive
-    ) {
-      return {
-        flagged: true,
-        reason: `Post total ${postTotal} ≥ ${p.minPostWhenPrePositive} and ratio ${ratio.toFixed(2)} ≥ ${p.minRatioWhenPrePositive} vs pre ${preTotal}.`,
-      };
-    }
-    return { flagged: false, reason: null };
-  }
-  if (postTotal >= p.minPostWhenPreZero) {
-    return {
-      flagged: true,
-      reason: `No pre-window activity; post total ${postTotal} ≥ ${p.minPostWhenPreZero}.`,
-    };
-  }
-  return { flagged: false, reason: null };
-}
+export type AggregatedAnalyzeResponse = {
+  summary: AnalyzeSummary;
+  sites: SiteAnalysisRow[];
+  warnings: string[];
+  appliedConfig: AppliedConfig;
+};
 
-export function analyzeDecomImpact(p: AnalyzeParams): AnalyzeResponse {
+export function aggregateDecomWindows(p: AggregateParams): AggregatedAnalyzeResponse {
   const tz = p.timeZone ?? DEFAULT_TZ;
   const analysisClampYmd = ymdInTz(p.analysisRunDate, tz);
 
@@ -135,8 +113,6 @@ export function analyzeDecomImpact(p: AnalyzeParams): AnalyzeResponse {
 
     const preTotal = preCns + preNrb;
     const postTotal = postCns + postNrb;
-    const { flagged, reason } = computeFlag(preTotal, postTotal, p);
-    if (flagged) flaggedCount += 1;
 
     const sortedEvents = [...list].sort(
       (a, b) => a.eventDate.getTime() - b.eventDate.getTime()
@@ -166,8 +142,8 @@ export function analyzeDecomImpact(p: AnalyzeParams): AnalyzeResponse {
       postCns,
       preNrb,
       postNrb,
-      flagged,
-      flagReason: reason,
+      flagged: false,
+      flagReason: null,
       naEngineerEmail: s.naEngineerEmail,
       naEngineerName: s.naEngineerName,
       events: details,
@@ -189,10 +165,7 @@ export function analyzeDecomImpact(p: AnalyzeParams): AnalyzeResponse {
     timeZone: tz,
     preDays: p.preDays,
     postDays: p.postDays,
-    analysisMode: "rules",
-    minPostWhenPrePositive: p.minPostWhenPrePositive,
-    minRatioWhenPrePositive: p.minRatioWhenPrePositive,
-    minPostWhenPreZero: p.minPostWhenPreZero,
+    analysisMode: "llm",
     analysisRunIso: p.analysisRunDate.toISOString(),
     postWindowClampYmd: analysisClampYmd,
     maxEventsPerSite: MAX_EVENTS_PER_SITE,

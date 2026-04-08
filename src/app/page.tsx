@@ -1,144 +1,182 @@
 import Link from "next/link";
-import { ArrowRight, ChevronDown } from "lucide-react";
+import {
+  ArrowRight,
+  BookOpen,
+  GitBranch,
+  Layers,
+  Mail,
+  RadioTower,
+  Sparkles,
+} from "lucide-react";
 import { BrandLogos } from "@/components/brand/brand-logos";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { PremiumDotGrid } from "@/components/visual/premium-mesh";
 
-const FLOW_STEPS = [
+const WHAT_IT_DOES = [
   {
-    step: "01",
-    title: "Prepare extracts",
-    body: "Maintain an Excel list of recent mmWave shutdowns by Fuze site ID (and optional NA engineer contact). Separately, export CNS pins and NRB tickets that are scoped to those sites with event dates.",
+    icon: Layers,
+    title: "Correlates network and customer data",
+    text: "Aligns **mmWave shutdown dates** (Fuze site ID) with **CNS pins and NRB tickets** so analysts can compare customer-reported volume in defined pre- and post-decommission windows.",
   },
   {
-    step: "02",
-    title: "Upload & configure",
-    body: "On the dashboard, attach both workbooks, set pre- and post-shutdown window lengths (in days), IANA timezone for calendar boundaries, and thresholds for what counts as a meaningful spike in customer-reported activity.",
+    icon: Sparkles,
+    title: "Applies generative AI for review",
+    text: "A configured **LLM interprets** pre/post patterns (with streamed rationale where enabled) and **prioritizes sites** that may warrant exceptions or reinstatement discussion — alongside your written guidance.",
   },
   {
-    step: "03",
-    title: "Run analysis",
-    body: "The server parses both files, joins rows on Fuze site ID, assigns each pin to the pre or post window relative to that site’s shutdown date, and clamps the post window so incomplete “future” periods do not skew results.",
-  },
-  {
-    step: "04",
-    title: "Review insights",
-    body: "Use KPIs, the flagged-site chart, and the sortable grid to compare pre vs post totals (CNS and NRB). Expand pin-level detail per site, filter to sites with any activity, and read data-quality warnings from the parser.",
-  },
-  {
-    step: "05",
-    title: "Simulate NA outreach",
-    body: "Generate a preview of the email that would go to each responsible NA engineer (grouped by address when present in the decom file). Nothing is sent in this version—copy or share the text to coordinate exceptions-list review.",
+    icon: GitBranch,
+    title: "Supports controlled escalation",
+    text: "You **confirm** which sites move forward; the tool **composes draft outreach** for NA engineers. **Outbound mail is not sent** from this application — operators copy drafts into standard messaging channels.",
   },
 ] as const;
 
-export default function IntroductionPage() {
+const STEPS_SHORT = [
+  "Load or maintain the **decommission site** list (file import, defaults, or manual rows).",
+  "Review **CNS/NRB** events joined on Fuze ID.",
+  "Run **analysis** with calendar windows, timezone, and optional analyst notes.",
+  "**Validate** flagged sites for reinstatement or exceptions consideration.",
+  "**Generate drafts** for NA distribution via your approved mail path.",
+] as const;
+
+function RichLine({ text }: { text: string }) {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
   return (
-    <div className="mx-auto max-w-4xl space-y-10">
-      <div className="space-y-6 border border-border bg-card p-8">
-        <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
-          <div className="space-y-4">
+    <span>
+      {parts.map((part, i) => {
+        if (part.startsWith("**") && part.endsWith("**")) {
+          return (
+            <strong key={i} className="font-semibold text-foreground">
+              {part.slice(2, -2)}
+            </strong>
+          );
+        }
+        return part;
+      })}
+    </span>
+  );
+}
+
+export default function WelcomePage() {
+  return (
+    <div className="mx-auto max-w-3xl space-y-10 pb-12">
+      <div className="animate-fade-up relative overflow-hidden rounded-2xl border border-border/70 bg-gradient-to-br from-card via-card to-primary/[0.04] p-8 shadow-premium-lg sm:p-10">
+        <PremiumDotGrid className="opacity-40" />
+        <div className="relative space-y-6">
+          <div className="inline-flex items-center gap-2 rounded-full border border-border/80 bg-muted/50 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.18em] text-muted-foreground">
+            Network Engineering
+          </div>
+          <div className="w-fit rounded-xl bg-white p-4 shadow-premium ring-1 ring-border/60">
             <BrandLogos variant="welcome" withLinks />
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-widest text-primary">
-                Verizon · Network Engineering · CTO Office
-              </p>
-              <h1 className="mt-2 text-3xl font-semibold tracking-tight text-foreground">
-                Decom impact on CNS pins
-              </h1>
-              <p className="mt-3 max-w-xl text-sm leading-relaxed text-muted-foreground">
-                This workspace helps you see whether recent mmWave site decommissions
-                line up with a material increase in customer-reported network issues
-                (CNS pins and NRB tickets). Upload standard extracts, run the analysis
-                in your browser, and focus NA follow-up on sites that clear your impact
-                rules—all without sending automated email in this release.
-              </p>
-            </div>
+          </div>
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+              Verizon Wireless · Network Engineering
+            </p>
+            <h1 className="font-display mt-3 text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
+              Decom impact on CNS pins
+            </h1>
+            <p className="mt-4 text-lg leading-relaxed text-muted-foreground">
+              <RichLine text="Production-style workspace for assessing whether **mmWave site decommissions** align with changes in **customer network signals** (CNS and NRB). Combines operational extracts with **LLM-assisted review** and **draft NA communications**, with analysts retaining full approval authority." />
+            </p>
           </div>
         </div>
+      </div>
 
-        <Separator />
-
-        <div>
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-            What this application does
-          </h2>
-          <ul className="mt-4 grid gap-3 sm:grid-cols-2">
-            <li className="border border-border bg-background px-4 py-3 text-sm leading-snug">
-              Aligns{" "}
-              <strong className="font-medium text-foreground">shutdown timing</strong>{" "}
-              with customer signal volume before and after each Fuze site’s mmWave
-              decommission date.
-            </li>
-            <li className="border border-border bg-background px-4 py-3 text-sm leading-snug">
-              Surfaces{" "}
-              <strong className="font-medium text-foreground">outlier sites</strong>{" "}
-              using transparent thresholds (ratio and minimum counts) you can tune for
-              your operating cadence.
-            </li>
-            <li className="border border-border bg-background px-4 py-3 text-sm leading-snug">
-              Supports{" "}
-              <strong className="font-medium text-foreground">exceptions workflow</strong>{" "}
-              with a structured, simulated email to NA engineers to consider re-listing
-              or reactivating high-impact locations.
-            </li>
-            <li className="border border-border bg-background px-4 py-3 text-sm leading-snug">
-              Keeps{" "}
-              <strong className="font-medium text-foreground">data in-session</strong>{" "}
-              for this build: uploads are posted to the server for each run only and are
-              not stored in an application database.
-            </li>
-          </ul>
+      <section className="space-y-4">
+        <h2 className="font-display text-sm font-bold uppercase tracking-[0.2em] text-muted-foreground">
+          Capabilities
+        </h2>
+        <div className="grid gap-4">
+          {WHAT_IT_DOES.map(({ icon: Icon, title, text }) => (
+            <Card
+              key={title}
+              className="overflow-hidden rounded-2xl border-border/70 shadow-premium transition-shadow hover:shadow-premium-lg"
+            >
+              <CardHeader className="flex flex-row items-start gap-4 space-y-0 pb-2">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-primary/25 bg-gradient-to-br from-primary/12 to-primary/5 text-primary">
+                  <Icon className="h-5 w-5" strokeWidth={1.75} aria-hidden />
+                </div>
+                <div>
+                  <CardTitle className="font-display text-lg">{title}</CardTitle>
+                  <CardDescription className="mt-2 text-base leading-relaxed text-muted-foreground">
+                    <RichLine text={text} />
+                  </CardDescription>
+                </div>
+              </CardHeader>
+            </Card>
+          ))}
         </div>
+      </section>
 
-        <div>
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-            End-to-end flow
-          </h2>
-          <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-            Workbooks must share a common{" "}
-            <strong className="font-medium text-foreground">Fuze site ID</strong> column
-            so shutdown rows join to CNS/NRB events. See the README for supported header
-            aliases and Vercel upload size guidance when you deploy.
-          </p>
-          <div className="mt-6 space-y-0">
-            {FLOW_STEPS.map((item, i) => (
-              <div key={item.step}>
-                <Card className="border-border shadow-none">
-                  <CardHeader className="flex flex-row items-center gap-4 space-y-0 pb-2 pt-4">
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center border border-primary bg-primary text-xs font-bold text-primary-foreground">
-                      {item.step}
-                    </span>
-                    <CardTitle className="text-base font-semibold">{item.title}</CardTitle>
-                  </CardHeader>
-                  <CardContent className="pb-4 pt-0">
-                    <p className="text-sm leading-relaxed text-muted-foreground">
-                      {item.body}
-                    </p>
-                  </CardContent>
-                </Card>
-                {i < FLOW_STEPS.length - 1 && (
-                  <div className="flex justify-center py-1 text-muted-foreground" aria-hidden>
-                    <ChevronDown className="h-4 w-4" />
-                  </div>
-                )}
-              </div>
+      <Card className="rounded-2xl border-border/70 bg-muted/30 shadow-premium">
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <RadioTower className="h-5 w-5 text-primary" aria-hidden />
+            <CardTitle className="font-display text-lg">Standard workflow</CardTitle>
+          </div>
+          <div className="text-base leading-relaxed text-muted-foreground">
+            In <strong className="text-foreground">Decom &amp; CNS analysis</strong> (main
+            workspace):
+          </div>
+        </CardHeader>
+        <CardContent>
+          <ol className="list-none space-y-3 text-sm leading-relaxed text-muted-foreground">
+            {STEPS_SHORT.map((line, i) => (
+              <li key={i} className="flex gap-3">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary/15 text-xs font-bold text-primary">
+                  {i + 1}
+                </span>
+                <span className="pt-0.5">
+                  <RichLine text={line} />
+                </span>
+              </li>
             ))}
-          </div>
-        </div>
+          </ol>
+        </CardContent>
+      </Card>
 
-        <div className="flex flex-wrap items-center gap-3 border-t border-border pt-6">
-          <Button asChild className="rounded-sm">
-            <Link href="/dashboard">
-              Open analysis dashboard
-              <ArrowRight className="h-4 w-4" />
-            </Link>
-          </Button>
-          <p className="text-xs text-muted-foreground">
-            Upload both Excel files there to refresh KPIs, charts, and the site table.
+      <Card className="rounded-2xl border border-border/80 bg-card shadow-premium">
+        <CardHeader className="pb-2">
+          <div className="flex items-center gap-2">
+            <Mail className="h-5 w-5 text-primary" aria-hidden />
+            <CardTitle className="font-display text-base">Configuration &amp; messaging</CardTitle>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm leading-relaxed text-muted-foreground">
+          <p>
+            Session processing: uploads are handled per request; persistent storage of customer data
+            in this deployment is out of scope unless your environment is configured otherwise.
+            Set <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">OPENAI_API_KEY</code>{" "}
+            (and optional <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">OPENAI_MODEL</code>
+            ) to enable the production LLM path. When those credentials are absent, analysis runs on
+            a documented <strong className="text-foreground">heuristic engine</strong> so the
+            workflow remains available in lower environments.
           </p>
-        </div>
+          <p>
+            <strong className="text-foreground">Outreach:</strong> Generated content is draft only.
+            Distribution must follow your organization&apos;s messaging and approval standards.
+          </p>
+        </CardContent>
+      </Card>
+
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <Button
+          asChild
+          size="lg"
+          className="h-12 rounded-xl px-8 text-base shadow-glow sm:min-w-[220px]"
+        >
+          <Link href="/dashboard" className="gap-2">
+            Open analysis workspace
+            <ArrowRight className="h-5 w-5" strokeWidth={2} />
+          </Link>
+        </Button>
+        <Button asChild variant="outline" size="lg" className="h-12 rounded-xl border-border/80">
+          <Link href="/introduction" className="gap-2">
+            <BookOpen className="h-4 w-4" />
+            Product overview
+          </Link>
+        </Button>
       </div>
     </div>
   );

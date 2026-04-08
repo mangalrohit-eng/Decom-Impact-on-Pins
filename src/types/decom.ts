@@ -31,6 +31,8 @@ export type SiteAnalysisRow = {
   postNrb: number;
   flagged: boolean;
   flagReason: string | null;
+  /** LLM-only: qualitative severity */
+  concernLevel?: "high" | "medium" | "low" | "none";
   naEngineerEmail?: string;
   naEngineerName?: string;
   events?: SiteEventDetail[];
@@ -47,16 +49,23 @@ export type AnalyzeSummary = {
   pinDateMax: string | null;
 };
 
+export type AnalysisMode = "llm" | "rules";
+
 export type AppliedConfig = {
   timeZone: string;
   preDays: number;
   postDays: number;
-  minPostWhenPrePositive: number;
-  minRatioWhenPrePositive: number;
-  minPostWhenPreZero: number;
+  analysisMode: AnalysisMode;
   analysisRunIso: string;
   postWindowClampYmd: string;
   maxEventsPerSite: number;
+  /** Optional user hints passed to the LLM */
+  analystNotes?: string;
+  llmModel?: string;
+  /** Rule-based (`analyzeDecomImpact`) only */
+  minPostWhenPrePositive?: number;
+  minRatioWhenPrePositive?: number;
+  minPostWhenPreZero?: number;
 };
 
 export type AnalyzeResponse = {
@@ -64,4 +73,10 @@ export type AnalyzeResponse = {
   sites: SiteAnalysisRow[];
   warnings: string[];
   appliedConfig: AppliedConfig;
+  /** Full streamed reasoning text (LLM path) */
+  llmReasoning?: string;
+  /** Short headline from the model (LLM path) */
+  llmOverview?: string;
+  /** True when LLM credentials were unavailable and heuristic fallback was used */
+  demoMode?: boolean;
 };

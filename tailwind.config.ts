@@ -7,12 +7,22 @@ const config: Config = {
     extend: {
       fontFamily: {
         sans: ["var(--font-sans)", "system-ui", "sans-serif"],
+        display: ["var(--font-display)", "var(--font-sans)", "system-ui", "sans-serif"],
         mono: ["var(--font-mono)", "ui-monospace", "monospace"],
+      },
+      boxShadow: {
+        premium:
+          "0 1px 2px hsl(222 47% 11% / 0.04), 0 8px 24px -4px hsl(222 47% 11% / 0.08), 0 0 0 1px hsl(220 13% 90% / 0.8)",
+        "premium-lg":
+          "0 4px 6px hsl(222 47% 11% / 0.03), 0 20px 48px -12px hsl(222 47% 11% / 0.12), 0 0 0 1px hsl(220 13% 90% / 0.6)",
+        glow: "0 0 40px -8px hsl(0 86% 51% / 0.35)",
       },
       borderRadius: {
         lg: "var(--radius)",
         md: "calc(var(--radius) - 1px)",
         sm: "calc(var(--radius) - 2px)",
+        xl: "calc(var(--radius) + 4px)",
+        "2xl": "calc(var(--radius) + 10px)",
       },
       colors: {
         background: "hsl(var(--background))",

@@ -44,7 +44,7 @@ export function buildSimulatedEmails(
 
     const subject = `${app}: ${rows.length} site(s) — possible CNS impact after mmWave decom`;
     const textBody = [
-      `This message was not sent (simulation only).`,
+      `Draft — not transmitted from this application. Copy into your mail client to send.`,
       ``,
       `Please review the following mmWave decommission sites where customer-reported activity (CNS/NRB) increased in the post-decom window. If impact is confirmed, consider adding the site to the exceptions list and coordinating reactivation per team process.`,
       ``,
@@ -60,7 +60,7 @@ export function buildSimulatedEmails(
       )
       .join("");
 
-    const htmlBody = `<p style="font-family:system-ui,sans-serif;font-size:14px;color:#222">This message was <strong>not sent</strong> (simulation only).</p>
+    const htmlBody = `<p style="font-family:system-ui,sans-serif;font-size:14px;color:#222"><strong>Draft</strong> — not transmitted from this application. Copy into your mail client to send.</p>
 <p style="font-family:system-ui,sans-serif;font-size:14px;color:#222">Please review the following mmWave decommission sites where customer-reported activity (CNS/NRB) increased in the post-decom window. If impact is confirmed, consider adding the site to the <strong>exceptions</strong> list and coordinating reactivation per team process.</p>
 <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;font-family:system-ui,sans-serif;font-size:13px">
 <thead><tr><th>Fuze site ID</th><th>Shutdown</th><th>Pre total</th><th>Post total</th><th>Reason</th></tr></thead>

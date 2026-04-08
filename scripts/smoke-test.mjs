@@ -28,15 +28,20 @@ async function main() {
   if (!health.ok) fail(`/api/health body missing ok: ${JSON.stringify(health)}`);
   console.log("OK  GET /api/health");
 
-  // --- GET / (introduction HTML) ---
+  // --- GET / (welcome HTML) ---
   const pageRes = await fetch(BASE + "/");
   if (!pageRes.ok) fail(`GET / status ${pageRes.status}`);
   const html = await pageRes.text();
   if (!html.includes("mmWave") && !html.includes("Decom"))
     fail("GET / HTML missing expected content");
-  if (!html.includes("Introduction") && !html.includes("end-to-end"))
-    fail("GET / expected introduction content");
-  console.log("OK  GET / (introduction)");
+  if (!html.includes("Capabilities") && !html.includes("Decom impact"))
+    fail("GET / expected welcome content");
+  console.log("OK  GET / (welcome)");
+
+  // --- GET /introduction ---
+  const introRes = await fetch(BASE + "/introduction");
+  if (!introRes.ok) fail(`GET /introduction status ${introRes.status}`);
+  console.log("OK  GET /introduction");
 
   const dashRes = await fetch(BASE + "/dashboard");
   if (!dashRes.ok) fail(`GET /dashboard status ${dashRes.status}`);

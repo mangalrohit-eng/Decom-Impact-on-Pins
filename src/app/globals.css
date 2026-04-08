@@ -2,32 +2,41 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Premium workspace — Verizon-inspired (crimson accent, deep slate chrome,
+ * warm paper main canvas). Not affiliated with Verizon trademark usage beyond
+ * palette inspiration for internal Network Engineering tooling.
+ */
 :root {
-  --background: 0 0% 99%;
-  --foreground: 240 6% 10%;
+  --background: 40 25% 97%;
+  --foreground: 222 47% 11%;
   --card: 0 0% 100%;
-  --card-foreground: 240 6% 10%;
+  --card-foreground: 222 47% 11%;
   --popover: 0 0% 100%;
-  --popover-foreground: 240 6% 10%;
-  --primary: 277 100% 50%;
+  --popover-foreground: 222 47% 11%;
+  /* Verizon-adjacent red */
+  --primary: 0 86% 51%;
   --primary-foreground: 0 0% 100%;
-  --secondary: 240 5% 96%;
-  --secondary-foreground: 240 6% 10%;
-  --muted: 240 5% 96%;
-  --muted-foreground: 240 4% 46%;
-  --accent: 277 100% 97%;
-  --accent-foreground: 277 100% 28%;
+  --secondary: 220 14% 96%;
+  --secondary-foreground: 222 47% 11%;
+  --muted: 220 14% 95%;
+  --muted-foreground: 220 9% 42%;
+  --accent: 0 75% 97%;
+  --accent-foreground: 0 72% 28%;
   --destructive: 0 72% 51%;
   --destructive-foreground: 0 0% 100%;
-  --border: 240 6% 90%;
-  --input: 240 6% 90%;
-  --ring: 277 100% 50%;
-  --radius: 2px;
-  --chart-1: 277 100% 50%;
-  --chart-2: 200 90% 48%;
-  --chart-3: 160 70% 40%;
-  --chart-4: 35 92% 50%;
-  --chart-5: 340 82% 52%;
+  --border: 220 13% 90%;
+  --input: 220 13% 90%;
+  --ring: 0 86% 51%;
+  --radius: 0.625rem;
+  --chart-1: 0 86% 51%;
+  --chart-2: 210 85% 48%;
+  --chart-3: 175 60% 38%;
+  --chart-4: 38 92% 50%;
+  --chart-5: 265 70% 52%;
+  /* Sidebar chrome (referenced in Tailwind arbitrary values) */
+  --sidebar: 222 24% 7%;
+  --sidebar-border: 220 16% 14%;
 }
 
 @layer base {
@@ -36,15 +45,79 @@
   }
   body {
     @apply bg-background text-foreground antialiased;
-    font-feature-settings: "rlig" 1, "calt" 1;
+    font-feature-settings: "rlig" 1, "calt" 1, "ss01" 1;
   }
 }
 
 @layer utilities {
-  .shadow,
-  .shadow-sm,
-  .shadow-md,
-  .shadow-lg {
-    box-shadow: none !important;
+  .decom-page-bg {
+    background-color: hsl(var(--background));
+    background-image: radial-gradient(
+        ellipse 100% 80% at 100% -20%,
+        hsl(var(--primary) / 0.06),
+        transparent 50%
+      ),
+      radial-gradient(
+        ellipse 80% 60% at 0% 100%,
+        hsl(210 85% 48% / 0.05),
+        transparent 45%
+      ),
+      radial-gradient(
+        ellipse 60% 40% at 80% 80%,
+        hsl(175 60% 38% / 0.04),
+        transparent 40%
+      );
+  }
+
+  .decom-elevate {
+    @apply shadow-premium ring-1 ring-border/60;
+  }
+
+  .decom-glass {
+    @apply border border-white/20 bg-white/70 shadow-premium backdrop-blur-xl;
+  }
+
+  .decom-glass-dark {
+    @apply border border-white/10 bg-[hsl(222_24%_10%/0.85)] shadow-premium-lg backdrop-blur-xl;
+  }
+
+  .text-gradient-brand {
+    @apply bg-gradient-to-r from-[hsl(0_86%_42%)] via-[hsl(0_86%_48%)] to-[hsl(220_70%_38%)] bg-clip-text text-transparent;
+  }
+
+  .animate-fade-up {
+    animation: decom-fade-up 0.6s ease-out both;
+  }
+
+  .animate-shimmer-slow {
+    animation: decom-shimmer 8s ease-in-out infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .animate-fade-up,
+    .animate-shimmer-slow {
+      animation: none;
+    }
+  }
+}
+
+@keyframes decom-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes decom-shimmer {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.85;
   }
 }

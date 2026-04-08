@@ -12,22 +12,28 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import type { LucideIcon } from "lucide-react";
 import {
   AlertTriangle,
   ArrowLeft,
   ArrowRight,
+  Bot,
+  Building2,
   Check,
   ChevronRight,
+  ClipboardCheck,
   FileSpreadsheet,
   Loader2,
   Mail,
-  Play,
+  Plus,
+  RadioTower,
   RotateCcw,
   Send,
+  Sparkles,
+  UserRound,
 } from "lucide-react";
-import { analyzeDecomImpact } from "@/lib/decom/analyze";
-import { buildSimulatedEmails } from "@/lib/decom/simulate-email";
 import { getDefaultCnsEvents, getDefaultShutdowns } from "@/data/workflow-defaults";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -40,6 +46,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -47,7 +54,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
 import {
   Table,
   TableBody,
@@ -56,47 +62,83 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type {
-  AnalyzeResponse,
-  CnsEventRow,
-  ShutdownRow,
-  SiteAnalysisRow,
-} from "@/types/decom";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Progress } from "@/components/ui/progress";
+import { cn } from "@/lib/utils";
+import type { AnalyzeResponse, CnsEventRow, ShutdownRow } from "@/types/decom";
+import { PremiumDotGrid } from "@/components/visual/premium-mesh";
 
-const STEPS = [
+type StepDef = {
+  n: number;
+  short: string;
+  title: string;
+  desc: string;
+  icon: LucideIcon;
+  aiDoes: string;
+  youDo: string;
+};
+
+const STEPS: StepDef[] = [
   {
     n: 1,
     short: "Decom",
     title: "Decommissioned sites",
-    desc: "Review mmWave shutdown rows (sample data loads automatically).",
+    desc: "Operational feed of mmWave shutdowns — add rows or replace via upload.",
+    icon: Building2,
+    aiDoes: "Uses shutdown dates as anchors for pre/post windows.",
+    youDo: "Curate the decom list or upload a workbook.",
   },
   {
     n: 2,
     short: "CNS",
     title: "CNS / NRB signals",
-    desc: "Customer pins and tickets by Fuze site ID.",
+    desc: "Customer pins and tickets keyed by Fuze site ID.",
+    icon: RadioTower,
+    aiDoes: "Will correlate these signals with each site’s timeline.",
+    youDo: "Maintain accurate Fuze IDs and event dates.",
   },
   {
     n: 3,
     short: "Analyze",
-    title: "Thresholds & run analysis",
-    desc: "Tune rules and compute pre vs post impact.",
+    title: "AI analysis",
+    desc: "The model streams reasoning, then flags sites with elevated post-decom customer signals.",
+    icon: Sparkles,
+    aiDoes: "Reasoning + structured flagging + concern levels.",
+    youDo: "Set windows, timezone, and optional analyst notes.",
   },
   {
     n: 4,
     short: "Validate",
     title: "Validate reinstatement",
-    desc: "Confirm which flagged sites belong on the exceptions path.",
+    desc: "Confirm which AI-flagged sites belong on the exceptions path.",
+    icon: ClipboardCheck,
+    aiDoes: "Surfaced candidates; does not commit workflow.",
+    youDo: "Check/uncheck sites before outreach.",
   },
   {
     n: 5,
     short: "Resolve",
     title: "Resolve outreach",
-    desc: "Preview simulated emails to NA engineers (not sent).",
+    desc: "Draft emails grouped by NA engineer (LLM when API key is set).",
+    icon: Send,
+    aiDoes: "Drafts subject/body/HTML for human send.",
+    youDo: "Copy, edit, and send outside this app.",
   },
-] as const;
+];
 
-type SimEmail = ReturnType<typeof buildSimulatedEmails>[number];
+type OutreachEmail = {
+  to: string;
+  subject: string;
+  textBody: string;
+  htmlBody: string;
+};
 
 function hydrateShutdowns(data: {
   shutdowns: Array<{
@@ -125,6 +167,24 @@ function hydrateEvents(data: {
   return data.events.map((e) => ({
     fuzeSiteId: e.fuzeSiteId,
     eventDate: new Date(e.eventDate),
+    kind: e.kind,
+    externalId: e.externalId,
+  }));
+}
+
+function serializeShutdowns(list: ShutdownRow[]) {
+  return list.map((s) => ({
+    fuzeSiteId: s.fuzeSiteId,
+    shutdownDate: s.shutdownDate.toISOString(),
+    naEngineerEmail: s.naEngineerEmail,
+    naEngineerName: s.naEngineerName,
+  }));
+}
+
+function serializeEvents(list: CnsEventRow[]) {
+  return list.map((e) => ({
+    fuzeSiteId: e.fuzeSiteId,
+    eventDate: e.eventDate.toISOString(),
     kind: e.kind,
     externalId: e.externalId,
   }));
@@ -179,25 +239,41 @@ export function DecomDashboard() {
 
   const [preDays, setPreDays] = useState("30");
   const [postDays, setPostDays] = useState("30");
-  const [minPostPos, setMinPostPos] = useState("3");
-  const [minRatio, setMinRatio] = useState("2");
-  const [minPostZero, setMinPostZero] = useState("5");
   const [timeZone, setTimeZone] = useState("America/New_York");
+  const [analystNotes, setAnalystNotes] = useState("");
 
   const [analysis, setAnalysis] = useState<AnalyzeResponse | null>(null);
   const [analysisRunning, setAnalysisRunning] = useState(false);
+  const [reasoningLog, setReasoningLog] = useState("");
 
   const [selectedReinstate, setSelectedReinstate] = useState<Set<string>>(new Set());
-  const [resolveEmails, setResolveEmails] = useState<SimEmail[] | null>(null);
+  const [resolveEmails, setResolveEmails] = useState<OutreachEmail[] | null>(null);
+  const [emailsLoading, setEmailsLoading] = useState(false);
+  const [emailsDemo, setEmailsDemo] = useState(false);
+  const [emailInfo, setEmailInfo] = useState<string | null>(null);
 
   const [error, setError] = useState<string | null>(null);
+
+  const [decomDialogOpen, setDecomDialogOpen] = useState(false);
+  const [newDecomId, setNewDecomId] = useState("");
+  const [newDecomDate, setNewDecomDate] = useState("");
+  const [newDecomEmail, setNewDecomEmail] = useState("");
+  const [newDecomName, setNewDecomName] = useState("");
+
+  const [cnsDialogOpen, setCnsDialogOpen] = useState(false);
+  const [newCnsFuze, setNewCnsFuze] = useState("");
+  const [newCnsDate, setNewCnsDate] = useState("");
+  const [newCnsKind, setNewCnsKind] = useState<"CNS" | "NRB">("CNS");
+  const [newCnsExtId, setNewCnsExtId] = useState("");
 
   const invalidateAnalysis = useCallback(() => {
     setAnalysis(null);
     setResolveEmails(null);
+    setReasoningLog("");
+    setEmailsDemo(false);
   }, []);
 
-  const onThresholdChange = useCallback(() => {
+  const onWindowChange = useCallback(() => {
     invalidateAnalysis();
   }, [invalidateAnalysis]);
 
@@ -222,9 +298,6 @@ export function DecomDashboard() {
       setShutdowns(hydrateShutdowns(data));
       setDecomFileName(file.name);
       invalidateAnalysis();
-      if (Array.isArray(data.warnings) && data.warnings.length) {
-        setError(null);
-      }
     } catch {
       setError("Network error uploading decom file.");
     } finally {
@@ -254,27 +327,82 @@ export function DecomDashboard() {
     }
   };
 
-  const runAnalysis = () => {
+  const runAnalysis = async () => {
     setAnalysisRunning(true);
     setError(null);
     setResolveEmails(null);
+    setReasoningLog("");
+    setEmailsDemo(false);
     try {
       const pre = Math.max(1, Math.min(365, Number(preDays) || 30));
       const post = Math.max(1, Math.min(365, Number(postDays) || 30));
-      const result = analyzeDecomImpact({
-        shutdowns,
-        events,
-        timeZone,
-        preDays: pre,
-        postDays: post,
-        minPostWhenPrePositive: Math.max(0, Number(minPostPos) || 3),
-        minRatioWhenPrePositive: Math.max(1, Number(minRatio) || 2),
-        minPostWhenPreZero: Math.max(0, Number(minPostZero) || 5),
-        analysisRunDate: new Date(),
+      const res = await fetch("/api/decom/llm-analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          shutdowns: serializeShutdowns(shutdowns),
+          events: serializeEvents(events),
+          preDays: pre,
+          postDays: post,
+          timeZone,
+          analystNotes,
+        }),
       });
-      setAnalysis(result);
-      const flaggedIds = result.sites.filter((s) => s.flagged).map((s) => s.fuzeSiteId);
-      setSelectedReinstate(new Set(flaggedIds));
+
+      if (!res.ok) {
+        const j = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(j.error ?? `Analysis failed (${res.status})`);
+      }
+
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No response stream.");
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let finalAnalysis: AnalyzeResponse | null = null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const chunks = buffer.split("\n\n");
+        buffer = chunks.pop() ?? "";
+        for (const block of chunks) {
+          const line = block.trim();
+          if (!line.startsWith("data: ")) continue;
+          let data: {
+            type?: string;
+            text?: string;
+            analysis?: AnalyzeResponse;
+            message?: string;
+          };
+          try {
+            data = JSON.parse(line.slice(6)) as typeof data;
+          } catch {
+            continue;
+          }
+          if (data.type === "reasoning" && typeof data.text === "string") {
+            setReasoningLog((prev) => prev + data.text);
+          }
+          if (data.type === "error") {
+            throw new Error(data.message ?? "Stream error");
+          }
+          if (data.type === "done" && data.analysis) {
+            finalAnalysis = data.analysis;
+          }
+        }
+      }
+
+      if (finalAnalysis) {
+        setAnalysis(finalAnalysis);
+        setReasoningLog((prev) => finalAnalysis!.llmReasoning ?? prev);
+        const flaggedIds = finalAnalysis.sites
+          .filter((s) => s.flagged)
+          .map((s) => s.fuzeSiteId);
+        setSelectedReinstate(new Set(flaggedIds));
+      } else {
+        throw new Error("Analysis stream ended without a result.");
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Analysis failed.");
     } finally {
@@ -314,7 +442,7 @@ export function DecomDashboard() {
 
   const clearReinstate = () => setSelectedReinstate(new Set());
 
-  const generateResolveEmails = () => {
+  const generateResolveEmails = async () => {
     if (!analysis) return;
     const chosen = analysis.sites.filter(
       (s) => s.flagged && selectedReinstate.has(s.fuzeSiteId)
@@ -325,10 +453,36 @@ export function DecomDashboard() {
       return;
     }
     setError(null);
-    const emails = buildSimulatedEmails(chosen, {
-      appName: "mmWave reinstatement / exceptions review",
-    });
-    setResolveEmails(emails);
+    setEmailsLoading(true);
+    setEmailsDemo(false);
+    setEmailInfo(null);
+    try {
+      const res = await fetch("/api/decom/llm-emails", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sites: chosen }),
+      });
+      const data = (await res.json()) as {
+        emails?: OutreachEmail[];
+        demoMode?: boolean;
+        error?: string;
+        warning?: string;
+      };
+      if (!res.ok) {
+        throw new Error(data.error ?? "Email request failed.");
+      }
+      if (!data.emails?.length) {
+        throw new Error("No emails returned.");
+      }
+      setResolveEmails(data.emails);
+      setEmailsDemo(Boolean(data.demoMode));
+      setEmailInfo(data.warning ?? null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Email generation failed.");
+      setResolveEmails(null);
+    } finally {
+      setEmailsLoading(false);
+    }
   };
 
   const copyText = async (text: string) => {
@@ -353,58 +507,200 @@ export function DecomDashboard() {
             ? flaggedSites.length >= 0
             : true;
 
+  const addDecomRow = () => {
+    const id = newDecomId.trim();
+    if (!id || !newDecomDate) return;
+    setShutdowns((prev) => [
+      ...prev,
+      {
+        fuzeSiteId: id,
+        shutdownDate: new Date(`${newDecomDate}T12:00:00.000Z`),
+        naEngineerEmail: newDecomEmail.trim() || undefined,
+        naEngineerName: newDecomName.trim() || undefined,
+      },
+    ]);
+    setDecomDialogOpen(false);
+    setNewDecomId("");
+    setNewDecomDate("");
+    setNewDecomEmail("");
+    setNewDecomName("");
+    invalidateAnalysis();
+  };
+
+  const addCnsRow = () => {
+    const fuze = newCnsFuze.trim();
+    if (!fuze || !newCnsDate) return;
+    setEvents((prev) => [
+      ...prev,
+      {
+        fuzeSiteId: fuze,
+        eventDate: new Date(`${newCnsDate}T12:00:00.000Z`),
+        kind: newCnsKind,
+        externalId: newCnsExtId.trim() || undefined,
+      },
+    ]);
+    setCnsDialogOpen(false);
+    setNewCnsFuze("");
+    setNewCnsDate("");
+    setNewCnsKind("CNS");
+    setNewCnsExtId("");
+    invalidateAnalysis();
+  };
+
+  const displayedReasoning =
+    analysis?.llmReasoning && !analysisRunning ? analysis.llmReasoning : reasoningLog;
+
+  const workflowProgress = Math.round((step / STEPS.length) * 100);
+  const activeStep = STEPS[step - 1];
+
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-8">
-      <div className="space-y-1 border-b border-border pb-6">
-        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Analysis insights
-        </p>
-        <h1 className="text-2xl font-semibold tracking-tight">
-          mmWave decom &amp; customer signal impact
-        </h1>
-        <p className="max-w-2xl text-sm text-muted-foreground">
-          Five-step workflow: decom data → CNS data → thresholds &amp; analysis → validate
-          reinstatement → outreach preview.{" "}
-          <Link href="/" className="font-medium text-primary underline-offset-4 hover:underline">
-            Introduction
-          </Link>
-        </p>
+      <div className="decom-elevate relative overflow-hidden rounded-2xl border border-border/70 bg-card p-6 shadow-premium-lg sm:p-8">
+        <PremiumDotGrid className="opacity-40" />
+        <div className="relative space-y-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge
+                  variant="secondary"
+                  className="rounded-full border border-primary/15 bg-primary/10 font-medium text-primary"
+                >
+                  <Sparkles className="mr-1 h-3.5 w-3.5" aria-hidden strokeWidth={2} />
+                  LLM-assisted operations
+                </Badge>
+                <Badge variant="outline" className="rounded-full font-mono text-xs font-normal">
+                  Step {step} / {STEPS.length}
+                </Badge>
+              </div>
+              <h1 className="font-display text-2xl font-bold tracking-tight text-foreground sm:text-3xl md:text-4xl">
+                mmWave decom &amp;{" "}
+                <span className="text-primary">customer signal</span> impact
+              </h1>
+              <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground sm:text-base">
+                LLM-supported interpretation, prioritization, and outreach composition — with analysts
+                validating every escalation.{" "}
+                <Link
+                  href="/introduction"
+                  className="font-semibold text-primary underline-offset-4 hover:underline"
+                >
+                  Product overview
+                </Link>
+              </p>
+            </div>
+          </div>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between text-xs font-medium text-muted-foreground">
+              <span>Workflow progress</span>
+              <span className="tabular-nums text-foreground">{workflowProgress}%</span>
+            </div>
+            <Progress value={workflowProgress} className="h-2 bg-muted/80" />
+          </div>
+        </div>
       </div>
 
-      {/* Stepper */}
+      <div className="grid gap-3 sm:grid-cols-5">
+        {STEPS.map((s) => {
+          const Icon = s.icon;
+          const isActive = s.n === step;
+          const isDone = s.n < step;
+          const unlocked =
+            s.n <= step || (s.n === 4 && analysis != null) || (s.n === 5 && analysis != null);
+          const locked = !unlocked && s.n > step;
+          return (
+            <button
+              key={s.n}
+              type="button"
+              disabled={locked}
+              onClick={() => {
+                if (unlocked) setStep(s.n);
+              }}
+              className={cn(
+                "flex flex-col gap-2 rounded-xl border p-3.5 text-left shadow-sm transition-all duration-200",
+                isActive &&
+                  "border-primary/40 bg-gradient-to-br from-primary/[0.07] to-card shadow-premium ring-1 ring-primary/15",
+                isDone && !isActive && "border-border/80 bg-muted/40",
+                !isActive && !isDone && !locked && "border-border/60 bg-card hover:border-primary/20 hover:shadow-premium",
+                locked && "cursor-not-allowed border-dashed border-border/40 bg-muted/10 opacity-45"
+              )}
+            >
+              <div className="flex items-center gap-2">
+                <span
+                  className={cn(
+                    "flex h-9 w-9 items-center justify-center rounded-lg border text-xs font-bold",
+                    isActive
+                      ? "border-primary bg-gradient-to-br from-primary to-[hsl(0_72%_42%)] text-primary-foreground shadow-sm"
+                      : "border-border bg-background text-muted-foreground"
+                  )}
+                >
+                  <Icon className="h-4 w-4" aria-hidden />
+                </span>
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  {s.short}
+                </span>
+              </div>
+              <p className="line-clamp-2 text-[11px] leading-snug text-muted-foreground">
+                <span className="font-medium text-foreground/90">AI:</span> {s.aiDoes}
+              </p>
+            </button>
+          );
+        })}
+      </div>
+
       <nav aria-label="Workflow steps" className="flex flex-col gap-3">
         <ol className="flex flex-wrap items-center gap-1 text-xs sm:text-sm">
-          {STEPS.map((s, i) => (
-            <li key={s.n} className="flex items-center gap-1">
-              <button
-                type="button"
-                onClick={() => {
-                  if (s.n <= step || (s.n === 4 && analysis) || (s.n === 5 && analysis))
-                    setStep(s.n);
-                }}
-                className={
-                  step === s.n
-                    ? "flex items-center gap-1.5 rounded-sm border border-primary bg-primary px-2.5 py-1.5 font-medium text-primary-foreground"
-                    : s.n < step || (s.n === 4 && analysis) || (s.n === 5 && analysis)
-                      ? "flex items-center gap-1.5 rounded-sm border border-border px-2.5 py-1.5 text-muted-foreground hover:bg-muted"
-                      : "flex items-center gap-1.5 rounded-sm border border-transparent px-2.5 py-1.5 text-muted-foreground/50"
-                }
-              >
-                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-background/20 text-[10px] font-bold sm:text-xs">
-                  {s.n}
-                </span>
-                <span className="hidden sm:inline">{s.short}</span>
-              </button>
-              {i < STEPS.length - 1 ? (
-                <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-              ) : null}
-            </li>
-          ))}
+          {STEPS.map((s, i) => {
+            const StepIcon = s.icon;
+            return (
+              <li key={s.n} className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (s.n <= step || (s.n === 4 && analysis) || (s.n === 5 && analysis))
+                      setStep(s.n);
+                  }}
+                  className={cn(
+                    "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-all",
+                    step === s.n
+                      ? "border-primary bg-primary text-primary-foreground shadow-sm"
+                      : s.n < step || (s.n === 4 && analysis) || (s.n === 5 && analysis)
+                        ? "border-border/80 text-muted-foreground hover:bg-muted/80"
+                        : "border-transparent text-muted-foreground/45"
+                  )}
+                >
+                  <StepIcon className="h-3.5 w-3.5 opacity-90" aria-hidden />
+                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-background/20 text-[10px] font-bold sm:text-xs">
+                    {s.n}
+                  </span>
+                  <span className="hidden sm:inline">{s.short}</span>
+                </button>
+                {i < STEPS.length - 1 ? (
+                  <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                ) : null}
+              </li>
+            );
+          })}
         </ol>
-        <div>
-          <h2 className="text-lg font-semibold">{STEPS[step - 1]?.title}</h2>
-          <p className="text-sm text-muted-foreground">{STEPS[step - 1]?.desc}</p>
-        </div>
+        {activeStep ? (
+          <div className="decom-elevate rounded-2xl border border-border/70 bg-gradient-to-br from-card via-card to-muted/20 p-5 sm:p-6">
+            <h2 className="font-display text-xl font-bold tracking-tight">{activeStep.title}</h2>
+            <p className="mt-1 text-sm text-muted-foreground">{activeStep.desc}</p>
+            <div className="mt-3 flex flex-col gap-2 border-t border-border/60 pt-3 sm:flex-row sm:gap-6">
+              <p className="flex flex-1 items-start gap-2 text-xs text-muted-foreground">
+                <Bot className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />
+                <span>
+                  <span className="font-semibold text-foreground">Model</span> —{" "}
+                  {activeStep.aiDoes}
+                </span>
+              </p>
+              <p className="flex flex-1 items-start gap-2 text-xs text-muted-foreground">
+                <UserRound className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                <span>
+                  <span className="font-semibold text-foreground">You</span> — {activeStep.youDo}
+                </span>
+              </p>
+            </div>
+          </div>
+        ) : null}
       </nav>
 
       {error && (
@@ -417,60 +713,132 @@ export function DecomDashboard() {
         </div>
       )}
 
-      {/* Step 1 */}
       {step === 1 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <FileSpreadsheet className="h-4 w-4" aria-hidden />
-              Decommissioned sites
-            </CardTitle>
-            <CardDescription>
-              Sample shutdown rows load by default. Replace with your extract (.xlsx) anytime.
-              {decomFileName ? (
-                <span className="mt-1 block font-medium text-foreground">
-                  Current file: {decomFileName}
-                </span>
-              ) : (
-                <span className="mt-1 block">Using built-in sample data.</span>
-              )}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex flex-wrap gap-2">
-              <Input
-                type="file"
-                accept=".xlsx,.xls"
-                className="max-w-sm cursor-pointer"
-                disabled={uploadingDecom}
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) void uploadDecom(f);
-                  e.target.value = "";
-                }}
-              />
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setShutdowns(getDefaultShutdowns());
-                  setDecomFileName(null);
-                  invalidateAnalysis();
-                }}
-              >
-                <RotateCcw className="h-4 w-4" aria-hidden />
-                Reset to sample data
-              </Button>
+        <Card className="overflow-hidden rounded-2xl border-border/70 shadow-premium-lg">
+          <CardHeader className="border-b border-border/60 bg-gradient-to-r from-muted/40 to-transparent">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <CardTitle className="font-display flex items-center gap-2 text-base font-semibold">
+                    <FileSpreadsheet className="h-4 w-4 text-primary" aria-hidden />
+                    Decommissioned sites
+                  </CardTitle>
+                  <Badge variant="secondary" className="font-normal">
+                    <span
+                      className="mr-1.5 inline-block h-2 w-2 rounded-full bg-emerald-500"
+                      aria-hidden
+                    />
+                    Operational data
+                  </Badge>
+                  <Badge variant="outline" className="font-mono text-xs font-normal">
+                    {shutdowns.length} sites
+                  </Badge>
+                </div>
+                <CardDescription>
+                  {decomFileName ? (
+                    <span className="font-medium text-foreground">
+                      Loaded file: {decomFileName}
+                    </span>
+                  ) : (
+                    "Reference extract loaded — replace with your file or append rows."
+                  )}
+                </CardDescription>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Dialog open={decomDialogOpen} onOpenChange={setDecomDialogOpen}>
+                  <DialogTrigger asChild>
+                    <Button type="button" variant="secondary" size="sm">
+                      <Plus className="h-4 w-4" aria-hidden />
+                      Add site
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Add shutdown row</DialogTitle>
+                    </DialogHeader>
+                    <div className="grid gap-3 py-2">
+                      <div className="space-y-2">
+                        <Label htmlFor="nd-id">Fuze site ID</Label>
+                        <Input
+                          id="nd-id"
+                          value={newDecomId}
+                          onChange={(e) => setNewDecomId(e.target.value)}
+                          placeholder="FZ-NAM-099"
+                          className="font-mono"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="nd-date">Shutdown date</Label>
+                        <Input
+                          id="nd-date"
+                          type="date"
+                          value={newDecomDate}
+                          onChange={(e) => setNewDecomDate(e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="nd-email">NA engineer email (optional)</Label>
+                        <Input
+                          id="nd-email"
+                          type="email"
+                          value={newDecomEmail}
+                          onChange={(e) => setNewDecomEmail(e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="nd-name">NA engineer name (optional)</Label>
+                        <Input
+                          id="nd-name"
+                          value={newDecomName}
+                          onChange={(e) => setNewDecomName(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                    <DialogFooter>
+                      <Button type="button" variant="outline" onClick={() => setDecomDialogOpen(false)}>
+                        Cancel
+                      </Button>
+                      <Button type="button" onClick={addDecomRow} disabled={!newDecomId.trim() || !newDecomDate}>
+                        Add to feed
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+                <Input
+                  type="file"
+                  accept=".xlsx,.xls"
+                  className="max-w-[200px] cursor-pointer text-xs"
+                  disabled={uploadingDecom}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) void uploadDecom(f);
+                    e.target.value = "";
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setShutdowns(getDefaultShutdowns());
+                    setDecomFileName(null);
+                    invalidateAnalysis();
+                  }}
+                >
+                  <RotateCcw className="h-4 w-4" aria-hidden />
+                  Reset feed
+                </Button>
+              </div>
             </div>
+          </CardHeader>
+          <CardContent className="space-y-4 pt-4">
             {uploadingDecom ? (
               <p className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
                 Parsing workbook…
               </p>
             ) : null}
-            <Separator />
-            <ScrollArea className="h-[min(360px,50vh)] w-full rounded-md border border-border">
+            <ScrollArea className="h-[min(420px,55vh)] w-full rounded-md border border-border">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -486,7 +854,7 @@ export function DecomDashboard() {
                       <TableCell className="text-xs">
                         {r.shutdownDate.toISOString().slice(0, 10)}
                       </TableCell>
-                      <TableCell className="max-w-[200px] truncate text-xs">
+                      <TableCell className="max-w-[220px] truncate text-xs">
                         {r.naEngineerEmail ?? r.naEngineerName ?? "—"}
                       </TableCell>
                     </TableRow>
@@ -494,67 +862,142 @@ export function DecomDashboard() {
                 </TableBody>
               </Table>
             </ScrollArea>
-            <p className="text-xs text-muted-foreground">
-              {shutdowns.length} site(s) in working set.
-            </p>
           </CardContent>
         </Card>
       )}
 
-      {/* Step 2 */}
       {step === 2 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <FileSpreadsheet className="h-4 w-4" aria-hidden />
-              CNS pins &amp; NRB tickets
-            </CardTitle>
-            <CardDescription>
-              Sample customer-signal rows load by default. Upload your extract to replace them.
-              {cnsFileName ? (
-                <span className="mt-1 block font-medium text-foreground">
-                  Current file: {cnsFileName}
-                </span>
-              ) : (
-                <span className="mt-1 block">Using built-in sample data.</span>
-              )}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex flex-wrap gap-2">
-              <Input
-                type="file"
-                accept=".xlsx,.xls"
-                className="max-w-sm cursor-pointer"
-                disabled={uploadingCns}
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) void uploadCns(f);
-                  e.target.value = "";
-                }}
-              />
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setEvents(getDefaultCnsEvents());
-                  setCnsFileName(null);
-                  invalidateAnalysis();
-                }}
-              >
-                <RotateCcw className="h-4 w-4" aria-hidden />
-                Reset to sample data
-              </Button>
+        <Card className="overflow-hidden rounded-2xl border-border/70 shadow-premium-lg">
+          <CardHeader className="border-b border-border/60 bg-gradient-to-r from-muted/40 to-transparent">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <CardTitle className="font-display flex items-center gap-2 text-base font-semibold">
+                    <FileSpreadsheet className="h-4 w-4 text-primary" aria-hidden />
+                    CNS pins &amp; NRB tickets
+                  </CardTitle>
+                  <Badge variant="secondary" className="font-normal">
+                    <span
+                      className="mr-1.5 inline-block h-2 w-2 rounded-full bg-sky-500"
+                      aria-hidden
+                    />
+                    Operational data
+                  </Badge>
+                  <Badge variant="outline" className="font-mono text-xs font-normal">
+                    {events.length} rows
+                  </Badge>
+                </div>
+                <CardDescription>
+                  {cnsFileName ? (
+                    <span className="font-medium text-foreground">
+                      Loaded file: {cnsFileName}
+                    </span>
+                  ) : (
+                    "Reference signal history per site — upload replaces the working set or add rows."
+                  )}
+                </CardDescription>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Dialog open={cnsDialogOpen} onOpenChange={setCnsDialogOpen}>
+                  <DialogTrigger asChild>
+                    <Button type="button" variant="secondary" size="sm">
+                      <Plus className="h-4 w-4" aria-hidden />
+                      Add signal
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Add CNS / NRB row</DialogTitle>
+                    </DialogHeader>
+                    <div className="grid gap-3 py-2">
+                      <div className="space-y-2">
+                        <Label htmlFor="nc-fuze">Fuze site ID</Label>
+                        <Input
+                          id="nc-fuze"
+                          value={newCnsFuze}
+                          onChange={(e) => setNewCnsFuze(e.target.value)}
+                          placeholder="FZ-NAM-001"
+                          className="font-mono"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="nc-date">Event date</Label>
+                        <Input
+                          id="nc-date"
+                          type="date"
+                          value={newCnsDate}
+                          onChange={(e) => setNewCnsDate(e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Type</Label>
+                        <Select
+                          value={newCnsKind}
+                          onValueChange={(v) => setNewCnsKind(v as "CNS" | "NRB")}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="CNS">CNS</SelectItem>
+                            <SelectItem value="NRB">NRB</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="nc-ext">External ID (optional)</Label>
+                        <Input
+                          id="nc-ext"
+                          value={newCnsExtId}
+                          onChange={(e) => setNewCnsExtId(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                    <DialogFooter>
+                      <Button type="button" variant="outline" onClick={() => setCnsDialogOpen(false)}>
+                        Cancel
+                      </Button>
+                      <Button type="button" onClick={addCnsRow} disabled={!newCnsFuze.trim() || !newCnsDate}>
+                        Add to feed
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+                <Input
+                  type="file"
+                  accept=".xlsx,.xls"
+                  className="max-w-[200px] cursor-pointer text-xs"
+                  disabled={uploadingCns}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) void uploadCns(f);
+                    e.target.value = "";
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setEvents(getDefaultCnsEvents());
+                    setCnsFileName(null);
+                    invalidateAnalysis();
+                  }}
+                >
+                  <RotateCcw className="h-4 w-4" aria-hidden />
+                  Reset feed
+                </Button>
+              </div>
             </div>
+          </CardHeader>
+          <CardContent className="space-y-4 pt-4">
             {uploadingCns ? (
               <p className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
                 Parsing workbook…
               </p>
             ) : null}
-            <Separator />
-            <ScrollArea className="h-[min(360px,50vh)] w-full rounded-md border border-border">
+            <ScrollArea className="h-[min(420px,55vh)] w-full rounded-md border border-border">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -565,7 +1008,7 @@ export function DecomDashboard() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {events.slice(0, 200).map((r, idx) => (
+                  {events.map((r, idx) => (
                     <TableRow key={`${r.fuzeSiteId}-${idx}-${r.externalId ?? ""}`}>
                       <TableCell className="font-mono text-xs">{r.fuzeSiteId}</TableCell>
                       <TableCell className="text-xs">
@@ -579,21 +1022,31 @@ export function DecomDashboard() {
               </Table>
             </ScrollArea>
             <p className="text-xs text-muted-foreground">
-              Showing {Math.min(200, events.length)} of {events.length} row(s).
+              Showing all {events.length} row(s) in the working set.
             </p>
           </CardContent>
         </Card>
       )}
 
-      {/* Step 3 */}
       {step === 3 && (
         <div className="space-y-6">
+          {analysis?.demoMode ? (
+            <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-950 dark:text-amber-100">
+              <strong>Heuristic analysis mode.</strong> LLM credentials are not configured (
+              <code className="rounded bg-muted px-1">OPENAI_API_KEY</code>). Output below uses the
+              on-platform fallback engine; configure the key for full generative review.
+            </div>
+          ) : null}
+
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Analysis parameters</CardTitle>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Sparkles className="h-4 w-4 text-primary" aria-hidden />
+                Windows &amp; analyst context
+              </CardTitle>
               <CardDescription>
-                Windows and thresholds apply to <strong>total</strong> pins (CNS + NRB). Changing
-                any value clears the last run until you analyze again.
+                Pre/post windows define how pin counts are bucketed for the model. They are not
+                threshold rules — the LLM judges impact.
               </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -605,7 +1058,7 @@ export function DecomDashboard() {
                   value={preDays}
                   onChange={(e) => {
                     setPreDays(e.target.value);
-                    onThresholdChange();
+                    onWindowChange();
                   }}
                 />
               </div>
@@ -617,7 +1070,7 @@ export function DecomDashboard() {
                   value={postDays}
                   onChange={(e) => {
                     setPostDays(e.target.value);
-                    onThresholdChange();
+                    onWindowChange();
                   }}
                 />
               </div>
@@ -628,68 +1081,89 @@ export function DecomDashboard() {
                   value={timeZone}
                   onChange={(e) => {
                     setTimeZone(e.target.value);
-                    onThresholdChange();
+                    onWindowChange();
                   }}
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="minPostPos">Min post count (pre &gt; 0)</Label>
-                <Input
-                  id="minPostPos"
-                  inputMode="numeric"
-                  value={minPostPos}
+              <div className="space-y-2 sm:col-span-2 lg:col-span-3">
+                <Label htmlFor="notes">Optional notes for the model</Label>
+                <Textarea
+                  id="notes"
+                  placeholder="e.g. Prioritize enterprise corridors; flag anything with NRB growth even if CNS is flat."
+                  value={analystNotes}
                   onChange={(e) => {
-                    setMinPostPos(e.target.value);
-                    onThresholdChange();
+                    setAnalystNotes(e.target.value);
+                    onWindowChange();
                   }}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="minRatio">Min post/pre ratio (pre &gt; 0)</Label>
-                <Input
-                  id="minRatio"
-                  inputMode="decimal"
-                  value={minRatio}
-                  onChange={(e) => {
-                    setMinRatio(e.target.value);
-                    onThresholdChange();
-                  }}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="minPostZero">Min post count (pre = 0)</Label>
-                <Input
-                  id="minPostZero"
-                  inputMode="numeric"
-                  value={minPostZero}
-                  onChange={(e) => {
-                    setMinPostZero(e.target.value);
-                    onThresholdChange();
-                  }}
+                  rows={3}
+                  className="resize-y"
                 />
               </div>
             </CardContent>
             <CardContent className="border-t border-border pt-6">
-              <Button type="button" onClick={runAnalysis} disabled={analysisRunning}>
+              <Button type="button" onClick={() => void runAnalysis()} disabled={analysisRunning}>
                 {analysisRunning ? (
                   <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
                 ) : (
-                  <Play className="h-4 w-4" aria-hidden />
+                  <Sparkles className="h-4 w-4" aria-hidden />
                 )}
                 Run analysis
               </Button>
               {!analysis ? (
                 <p className="mt-2 text-xs text-muted-foreground">
-                  Run analysis to enable the next step.
+                  The model streams its reasoning, then returns structured site decisions.
                 </p>
               ) : (
                 <p className="mt-2 text-xs text-muted-foreground">
-                  Last run: {new Date(analysis.appliedConfig.analysisRunIso).toLocaleString()} ·{" "}
-                  {analysis.summary.flaggedCount} site(s) flagged.
+                  Last run:{" "}
+                  {new Date(analysis.appliedConfig.analysisRunIso).toLocaleString()} ·{" "}
+                  {analysis.summary.flaggedCount} site(s) flagged by the model
+                  {analysis.appliedConfig.llmModel
+                    ? ` · ${analysis.appliedConfig.llmModel}`
+                    : ""}
+                  .
                 </p>
               )}
             </CardContent>
           </Card>
+
+          {(analysisRunning || displayedReasoning) && (
+            <Card className="rounded-2xl border-primary/25 bg-gradient-to-b from-primary/[0.06] via-muted/30 to-card shadow-premium">
+              <CardHeader className="pb-2">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-sm border border-primary/30 bg-primary/10">
+                    <Sparkles className="h-4 w-4 text-primary" aria-hidden />
+                  </div>
+                  <div>
+                    <CardTitle className="text-sm font-medium">Model reasoning</CardTitle>
+                    <CardDescription>
+                      {analysisRunning
+                        ? "Live stream — how the model reads the data."
+                        : "Final narrative from the last completed run."}
+                    </CardDescription>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <ScrollArea className="h-[min(280px,40vh)] w-full rounded-md border border-border/80 bg-background/90 p-4">
+                  <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-foreground/90">
+                    {displayedReasoning || (analysisRunning ? "…" : "")}
+                  </pre>
+                </ScrollArea>
+              </CardContent>
+            </Card>
+          )}
+
+          {analysis?.llmOverview ? (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">Headline</CardTitle>
+              </CardHeader>
+              <CardContent className="text-sm text-muted-foreground">
+                {analysis.llmOverview}
+              </CardContent>
+            </Card>
+          ) : null}
 
           {analysis && (
             <>
@@ -699,7 +1173,7 @@ export function DecomDashboard() {
                   label="Sites with pins"
                   value={String(analysis.summary.sitesWithEvents)}
                 />
-                <Kpi label="Flagged" value={String(analysis.summary.flaggedCount)} />
+                <Kpi label="AI-flagged" value={String(analysis.summary.flaggedCount)} />
                 <Kpi
                   label="Unmatched CNS rows"
                   value={String(analysis.summary.unmatchedEventCount)}
@@ -724,13 +1198,12 @@ export function DecomDashboard() {
         </div>
       )}
 
-      {/* Step 4 */}
       {step === 4 && analysis && (
         <div className="space-y-6">
           {chartData.length > 0 && (
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">Flagged sites — pre vs post</CardTitle>
+                <CardTitle className="text-base">AI-flagged sites — pre vs post</CardTitle>
               </CardHeader>
               <CardContent className="h-80">
                 <ResponsiveContainer width="100%" height="100%">
@@ -753,8 +1226,7 @@ export function DecomDashboard() {
               <div>
                 <CardTitle className="text-base">Reinstatement validation</CardTitle>
                 <CardDescription>
-                  Flagged sites only. Checked sites will be included in the step 5 outreach
-                  preview (exceptions / reactivation consideration).
+                  AI-flagged sites only. Checked sites are included in step 5 outreach drafts.
                 </CardDescription>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -769,8 +1241,8 @@ export function DecomDashboard() {
             <CardContent>
               {flaggedSites.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
-                  No sites met the impact thresholds. Adjust step 3 and run analysis again, or
-                  upload richer extracts.
+                  The model did not flag any sites. Add context in optional notes, widen windows, or
+                  enrich the feeds — then run AI analysis again.
                 </p>
               ) : (
                 <ScrollArea className="w-full">
@@ -782,7 +1254,8 @@ export function DecomDashboard() {
                         <TableHead>Shutdown</TableHead>
                         <TableHead className="text-right">Pre</TableHead>
                         <TableHead className="text-right">Post</TableHead>
-                        <TableHead>Reason</TableHead>
+                        <TableHead>Concern</TableHead>
+                        <TableHead>Rationale</TableHead>
                         <TableHead className="w-24">Pins</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -800,7 +1273,10 @@ export function DecomDashboard() {
                           <TableCell className="text-xs">{row.shutdownDate}</TableCell>
                           <TableCell className="text-right tabular-nums">{row.preTotal}</TableCell>
                           <TableCell className="text-right tabular-nums">{row.postTotal}</TableCell>
-                          <TableCell className="max-w-[240px] text-xs text-muted-foreground">
+                          <TableCell className="text-xs capitalize">
+                            {row.concernLevel ?? "—"}
+                          </TableCell>
+                          <TableCell className="max-w-[220px] text-xs text-muted-foreground">
                             {row.flagReason ?? "—"}
                           </TableCell>
                           <TableCell>
@@ -856,32 +1332,57 @@ export function DecomDashboard() {
         </div>
       )}
 
-      {/* Step 5 */}
       {step === 5 && analysis && (
-        <Card>
+        <Card className="rounded-2xl border-primary/15 decom-elevate shadow-premium-lg">
           <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Send className="h-4 w-4" aria-hidden />
-              Resolve — simulated NA outreach
-            </CardTitle>
+            <div className="flex flex-wrap items-center gap-2">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Send className="h-4 w-4" aria-hidden />
+                Resolve — AI outreach drafts
+              </CardTitle>
+              <Badge variant="secondary" className="text-[10px] font-normal">
+                Action step
+              </Badge>
+            </div>
             <CardDescription>
-              Generates preview emails for engineers tied to the sites you checked in step 4.
-              Nothing is sent automatically.
+              Compose draft messages for NA distribution from your validated site list (grouped by
+              engineer). With <code className="rounded bg-muted px-1 text-xs">OPENAI_API_KEY</code>{" "}
+              set, copy is model-generated; otherwise the standard structured template is used.
             </CardDescription>
           </CardHeader>
-          <CardContent className="flex flex-wrap gap-3">
-            <Button
-              type="button"
-              variant="default"
-              disabled={selectedReinstate.size === 0}
-              onClick={generateResolveEmails}
-            >
-              <Mail className="h-4 w-4" aria-hidden />
-              Generate outreach preview
-            </Button>
-            <p className="w-full text-xs text-muted-foreground">
-              {selectedReinstate.size} site(s) selected for outreach payload.
-            </p>
+          <CardContent className="flex flex-col gap-3">
+            {emailInfo ? (
+              <div
+                className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground"
+                role="status"
+              >
+                {emailInfo}
+              </div>
+            ) : null}
+            {emailsDemo ? (
+              <p className="text-xs text-muted-foreground">
+                Structured template mode — set <code className="rounded bg-muted px-1">OPENAI_API_KEY</code>{" "}
+                for LLM-generated correspondence.
+              </p>
+            ) : null}
+            <div className="flex flex-wrap gap-3">
+              <Button
+                type="button"
+                variant="default"
+                disabled={selectedReinstate.size === 0 || emailsLoading}
+                onClick={() => void generateResolveEmails()}
+              >
+                {emailsLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                ) : (
+                  <Mail className="h-4 w-4" aria-hidden />
+                )}
+                Generate AI outreach drafts
+              </Button>
+              <p className="w-full text-xs text-muted-foreground">
+                {selectedReinstate.size} site(s) selected — you copy and send outside this app.
+              </p>
+            </div>
           </CardContent>
           {resolveEmails && resolveEmails.length > 0 && (
             <CardContent className="space-y-6 border-t border-border pt-6">
@@ -929,7 +1430,17 @@ export function DecomDashboard() {
         </Card>
       )}
 
-      {/* Nav footer */}
+      <Card className="rounded-2xl border border-border/70 bg-muted/20 shadow-sm">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-semibold">Operational context</CardTitle>
+          <CardDescription className="text-xs leading-relaxed">
+            This module pairs decommission and customer-signal extracts with LLM-assisted review
+            and draft NA communications. Analyst approval and external mail delivery remain outside
+            this application per standard NE controls.
+          </CardDescription>
+        </CardHeader>
+      </Card>
+
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-6">
         <Button
           type="button"
@@ -940,13 +1451,14 @@ export function DecomDashboard() {
           <ArrowLeft className="h-4 w-4" aria-hidden />
           Back
         </Button>
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <div className="flex flex-col items-center gap-1 text-xs text-muted-foreground sm:flex-row sm:gap-3">
           {analysis && step >= 3 ? (
             <span className="inline-flex items-center gap-1">
               <Check className="h-3.5 w-3.5 text-primary" aria-hidden />
-              Analysis ready
+              Model run ready
             </span>
           ) : null}
+          <span className="hidden text-[10px] sm:inline">Analyst validates · LLM assists</span>
         </div>
         <Button
           type="button"
