@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "src/app/api/decom/analyze/route.ts": {
+      "maxDuration": 60
+    }
+  }
+}
