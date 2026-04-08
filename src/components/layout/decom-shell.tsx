@@ -1,6 +1,6 @@
 import Link from "next/link";
-import { Activity } from "lucide-react";
 import { BrandLogos } from "@/components/brand/brand-logos";
+import { DecomSidebarNav } from "@/components/layout/decom-sidebar-nav";
 
 export function DecomShell({ children }: { children: React.ReactNode }) {
   return (
@@ -20,15 +20,7 @@ export function DecomShell({ children }: { children: React.ReactNode }) {
             </p>
           </div>
         </Link>
-        <nav className="flex flex-1 flex-col gap-0.5 p-2">
-          <Link
-            href="/"
-            className="flex items-center gap-2 border border-border bg-accent px-3 py-2 text-sm font-medium text-accent-foreground"
-          >
-            <Activity className="h-4 w-4 shrink-0" aria-hidden />
-            Dashboard
-          </Link>
-        </nav>
+        <DecomSidebarNav />
         <div className="border-t border-border p-3 text-[10px] leading-relaxed text-muted-foreground">
           CTO Office · Network Engineering
         </div>

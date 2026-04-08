@@ -9,11 +9,20 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+Open [http://localhost:3000](http://localhost:3000) in a normal browser (not a raw HTML preview). You should see Inter/sans-serif typography, purple primary accents, and a two-column shell—not default blue underlined links or Times New Roman.
+
+### Styles look unstyled?
+
+- Run from the project root after `npm install`, then `npm run dev` or `npm run build && npm start`.
+- In DevTools → **Network**, confirm `/_next/static/css/*.css` returns **200** (not blocked by a proxy or corporate filter).
+- If you host behind **IIS** or a reverse proxy, ensure requests to `/_next/static/*` are forwarded to the Node/Next server.
+- After changing Tailwind or PostCSS, delete the `.next` folder and run `npm run dev` again.
 
 ## Workbooks
 
-Use the **first worksheet** of each `.xlsx` file.
+The parser scans **every worksheet** and the **first 40 rows** of each to find a **header row** that includes a Fuze / site ID column and a shutdown (or event) date column. Title rows or notes above the table are OK.
+
+If analysis still returns *No valid decom rows*, the red error panel lists **parser hints** (detected column names from row 1, etc.). Check that dates are real dates or text in a common format (`yyyy-MM-dd`, `MM/dd/yyyy`, etc.).
 
 ### Decom / shutdowns
 

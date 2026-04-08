@@ -1,26 +1,11 @@
 import type { CnsEventRow, EventKind } from "@/types/decom";
+import { parseExcelCellToDate } from "./parse-dates";
 import {
-  EVENT_DATE_HEADERS,
-  EVENT_ID_HEADERS,
-  EVENT_TYPE_HEADERS,
-  findColumnIndex,
-  FUZE_ID_HEADERS,
-} from "./column-map";
-import { workbookToRows } from "./xlsx-helpers";
-
-function cellToDate(value: unknown): Date | null {
-  if (value == null || value === "") return null;
-  if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
-  if (typeof value === "number") {
-    const utc = new Date(Math.round((value - 25569) * 86400 * 1000));
-    return Number.isNaN(utc.getTime()) ? null : utc;
-  }
-  const s = String(value).trim();
-  if (!s) return null;
-  const parsed = new Date(s);
-  if (!Number.isNaN(parsed.getTime())) return parsed;
-  return null;
-}
+  findCnsTableInWorkbook,
+  getCellByIndex,
+  padRowStrings,
+  workbookToRows,
+} from "./xlsx-helpers";
 
 function inferKind(typeCell: unknown): EventKind {
   const s = String(typeCell ?? "").toUpperCase();
@@ -36,57 +21,64 @@ export type ParseCnsResult = {
 
 export function parseCnsBuffer(buffer: Buffer): ParseCnsResult {
   const warnings: string[] = [];
-  const { headers, rows: sheetRows } = workbookToRows(buffer);
-  if (headers.length === 0) {
-    warnings.push("CNS workbook: no rows found.");
+
+  const table = findCnsTableInWorkbook(buffer);
+  if (!table) {
+    warnings.push(
+      "CNS workbook: could not find a header row with Fuze site ID and event/pin date in the first 40 rows of any sheet."
+    );
+    const legacy = workbookToRows(buffer);
+    if (legacy.headers.length) {
+      warnings.push(
+        `If your headers are on row 1 only, detected columns: ${legacy.headers.slice(0, 20).join(" | ")}`
+      );
+    } else {
+      warnings.push(
+        "No tabular data found. Confirm the file is .xlsx and the table is not entirely empty."
+      );
+    }
     return { events: [], warnings };
   }
 
-  const iFuze = findColumnIndex(headers, FUZE_ID_HEADERS);
-  const iDate = findColumnIndex(headers, EVENT_DATE_HEADERS);
-  if (iFuze < 0) {
-    warnings.push(
-      `CNS workbook: could not find Fuze Site ID column. Headers: ${headers.slice(0, 12).join(", ")}`
-    );
-    return { events: [], warnings };
-  }
-  if (iDate < 0) {
-    warnings.push(
-      `CNS workbook: could not find event date column. Headers: ${headers.slice(0, 12).join(", ")}`
-    );
-    return { events: [], warnings };
-  }
-
-  const hFuze = headers[iFuze];
-  const hDate = headers[iDate];
-  const iType = findColumnIndex(headers, EVENT_TYPE_HEADERS);
-  const iId = findColumnIndex(headers, EVENT_ID_HEADERS);
-  const hType = iType >= 0 ? headers[iType] : null;
-  const hId = iId >= 0 ? headers[iId] : null;
+  warnings.push(...table.warnings);
 
   const events: CnsEventRow[] = [];
-  for (let i = 0; i < sheetRows.length; i++) {
-    const r = sheetRows[i];
-    const fuze = String(r[hFuze] ?? "").trim();
-    const ed = cellToDate(r[hDate]);
+  for (let i = 0; i < table.dataRows.length; i++) {
+    const dr = table.dataRows[i] ?? [];
+    const fuze = String(getCellByIndex(dr, table.colFuze) ?? "").trim();
+    const ed = parseExcelCellToDate(getCellByIndex(dr, table.colDate));
     if (!fuze) {
-      warnings.push(`CNS row ${i + 2}: missing Fuze Site ID, skipped.`);
+      if (padRowStrings(dr, table.maxCols).some(Boolean)) {
+        warnings.push(
+          `CNS row ${table.headerRowIndex + i + 2}: missing Fuze site ID, skipped.`
+        );
+      }
       continue;
     }
     if (!ed) {
-      warnings.push(`CNS row ${i + 2}: invalid event date for ${fuze}, skipped.`);
+      warnings.push(
+        `CNS row ${table.headerRowIndex + i + 2}: invalid event date for ${fuze}, skipped.`
+      );
       continue;
     }
-    const kind = hType ? inferKind(r[hType]) : "CNS";
-    const ext =
-      hId && r[hId] != null && String(r[hId]).trim()
-        ? String(r[hId]).trim()
-        : undefined;
+
+    const kind =
+      table.colType >= 0
+        ? inferKind(getCellByIndex(dr, table.colType))
+        : "CNS";
+    let externalId: string | undefined;
+    if (table.colId >= 0) {
+      const idCell = getCellByIndex(dr, table.colId);
+      if (idCell != null && String(idCell).trim()) {
+        externalId = String(idCell).trim();
+      }
+    }
+
     events.push({
       fuzeSiteId: fuze,
       eventDate: ed,
       kind,
-      externalId: ext,
+      externalId,
     });
   }
 

@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import Link from "next/link";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Bar,
   BarChart,
@@ -11,8 +12,22 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { AlertTriangle, FileSpreadsheet, Loader2, Mail, Play } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  ArrowRight,
+  Check,
+  ChevronRight,
+  FileSpreadsheet,
+  Loader2,
+  Mail,
+  Play,
+  RotateCcw,
+  Send,
+} from "lucide-react";
+import { analyzeDecomImpact } from "@/lib/decom/analyze";
+import { buildSimulatedEmails } from "@/lib/decom/simulate-email";
+import { getDefaultCnsEvents, getDefaultShutdowns } from "@/data/workflow-defaults";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -32,6 +47,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Separator } from "@/components/ui/separator";
 import {
   Table,
   TableBody,
@@ -40,21 +56,78 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { BrandLogos } from "@/components/brand/brand-logos";
-import type { AnalyzeResponse, SiteAnalysisRow } from "@/types/decom";
+import type {
+  AnalyzeResponse,
+  CnsEventRow,
+  ShutdownRow,
+  SiteAnalysisRow,
+} from "@/types/decom";
 
-type SimEmail = {
-  to: string;
-  subject: string;
-  textBody: string;
-  htmlBody: string;
-};
+const STEPS = [
+  {
+    n: 1,
+    short: "Decom",
+    title: "Decommissioned sites",
+    desc: "Review mmWave shutdown rows (sample data loads automatically).",
+  },
+  {
+    n: 2,
+    short: "CNS",
+    title: "CNS / NRB signals",
+    desc: "Customer pins and tickets by Fuze site ID.",
+  },
+  {
+    n: 3,
+    short: "Analyze",
+    title: "Thresholds & run analysis",
+    desc: "Tune rules and compute pre vs post impact.",
+  },
+  {
+    n: 4,
+    short: "Validate",
+    title: "Validate reinstatement",
+    desc: "Confirm which flagged sites belong on the exceptions path.",
+  },
+  {
+    n: 5,
+    short: "Resolve",
+    title: "Resolve outreach",
+    desc: "Preview simulated emails to NA engineers (not sent).",
+  },
+] as const;
 
-function formatTime(d: Date): string {
-  return d.toLocaleString(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
+type SimEmail = ReturnType<typeof buildSimulatedEmails>[number];
+
+function hydrateShutdowns(data: {
+  shutdowns: Array<{
+    fuzeSiteId: string;
+    shutdownDate: string;
+    naEngineerEmail?: string;
+    naEngineerName?: string;
+  }>;
+}): ShutdownRow[] {
+  return data.shutdowns.map((s) => ({
+    fuzeSiteId: s.fuzeSiteId,
+    shutdownDate: new Date(s.shutdownDate),
+    naEngineerEmail: s.naEngineerEmail,
+    naEngineerName: s.naEngineerName,
+  }));
+}
+
+function hydrateEvents(data: {
+  events: Array<{
+    fuzeSiteId: string;
+    eventDate: string;
+    kind: "CNS" | "NRB";
+    externalId?: string;
+  }>;
+}): CnsEventRow[] {
+  return data.events.map((e) => ({
+    fuzeSiteId: e.fuzeSiteId,
+    eventDate: new Date(e.eventDate),
+    kind: e.kind,
+    externalId: e.externalId,
+  }));
 }
 
 type FlaggedTipPayload = {
@@ -83,13 +156,26 @@ function FlaggedChartTooltip({
   );
 }
 
-export function DecomDashboard() {
-  const decomInputRef = useRef<HTMLInputElement>(null);
-  const cnsInputRef = useRef<HTMLInputElement>(null);
+function Kpi({ label, value }: { label: string; value: string }) {
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardDescription>{label}</CardDescription>
+        <CardTitle className="text-2xl tabular-nums">{value}</CardTitle>
+      </CardHeader>
+    </Card>
+  );
+}
 
-  const [decomFile, setDecomFile] = useState<File | null>(null);
-  const [cnsFile, setCnsFile] = useState<File | null>(null);
-  const [lastRunAt, setLastRunAt] = useState<Date | null>(null);
+export function DecomDashboard() {
+  const [step, setStep] = useState(1);
+
+  const [shutdowns, setShutdowns] = useState<ShutdownRow[]>(() => getDefaultShutdowns());
+  const [events, setEvents] = useState<CnsEventRow[]>(() => getDefaultCnsEvents());
+  const [decomFileName, setDecomFileName] = useState<string | null>(null);
+  const [cnsFileName, setCnsFileName] = useState<string | null>(null);
+  const [uploadingDecom, setUploadingDecom] = useState(false);
+  const [uploadingCns, setUploadingCns] = useState(false);
 
   const [preDays, setPreDays] = useState("30");
   const [postDays, setPostDays] = useState("30");
@@ -98,90 +184,123 @@ export function DecomDashboard() {
   const [minPostZero, setMinPostZero] = useState("5");
   const [timeZone, setTimeZone] = useState("America/New_York");
 
-  const [loading, setLoading] = useState(false);
+  const [analysis, setAnalysis] = useState<AnalyzeResponse | null>(null);
+  const [analysisRunning, setAnalysisRunning] = useState(false);
+
+  const [selectedReinstate, setSelectedReinstate] = useState<Set<string>>(new Set());
+  const [resolveEmails, setResolveEmails] = useState<SimEmail[] | null>(null);
+
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<AnalyzeResponse | null>(null);
 
-  const [onlyWithPins, setOnlyWithPins] = useState(false);
-  const [selectedFlagged, setSelectedFlagged] = useState<Set<string>>(
-    () => new Set()
-  );
-
-  const [emails, setEmails] = useState<SimEmail[] | null>(null);
-  const [emailLoading, setEmailLoading] = useState(false);
-
-  const canRun = Boolean(decomFile && cnsFile && !loading);
-
-  const syncSelectionToFlagged = useCallback((sites: SiteAnalysisRow[]) => {
-    const flagged = sites.filter((s) => s.flagged).map((s) => s.fuzeSiteId);
-    setSelectedFlagged(new Set(flagged));
+  const invalidateAnalysis = useCallback(() => {
+    setAnalysis(null);
+    setResolveEmails(null);
   }, []);
 
-  const runAnalysis = async () => {
-    if (!decomFile || !cnsFile) return;
-    setLoading(true);
+  const onThresholdChange = useCallback(() => {
+    invalidateAnalysis();
+  }, [invalidateAnalysis]);
+
+  useEffect(() => {
+    if (step > 3 && !analysis) {
+      setStep(3);
+    }
+  }, [step, analysis]);
+
+  const uploadDecom = async (file: File) => {
+    setUploadingDecom(true);
     setError(null);
-    setEmails(null);
     try {
       const fd = new FormData();
-      fd.append("decomFile", decomFile);
-      fd.append("cnsFile", cnsFile);
-      fd.append("preDays", preDays);
-      fd.append("postDays", postDays);
-      fd.append("minPostWhenPrePositive", minPostPos);
-      fd.append("minRatioWhenPrePositive", minRatio);
-      fd.append("minPostWhenPreZero", minPostZero);
-      fd.append("timeZone", timeZone);
-
-      const res = await fetch("/api/decom/analyze", {
-        method: "POST",
-        body: fd,
-      });
+      fd.append("file", file);
+      const res = await fetch("/api/decom/parse-shutdowns", { method: "POST", body: fd });
       const data = await res.json();
       if (!res.ok) {
-        const msg =
-          typeof data.error === "string"
-            ? data.error
-            : `Request failed (${res.status})`;
-        setError(msg);
-        setResult(null);
+        setError(data.error ?? "Decom upload failed.");
         return;
       }
-      const next = data as AnalyzeResponse;
-      setResult(next);
-      setLastRunAt(new Date());
-      syncSelectionToFlagged(next.sites);
+      setShutdowns(hydrateShutdowns(data));
+      setDecomFileName(file.name);
+      invalidateAnalysis();
+      if (Array.isArray(data.warnings) && data.warnings.length) {
+        setError(null);
+      }
     } catch {
-      setError("Network error while analyzing.");
-      setResult(null);
+      setError("Network error uploading decom file.");
     } finally {
-      setLoading(false);
+      setUploadingDecom(false);
     }
   };
 
-  const filteredSites = useMemo(() => {
-    if (!result) return [];
-    if (!onlyWithPins) return result.sites;
-    return result.sites.filter((s) => s.preTotal + s.postTotal > 0);
-  }, [result, onlyWithPins]);
+  const uploadCns = async (file: File) => {
+    setUploadingCns(true);
+    setError(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/api/decom/parse-cns", { method: "POST", body: fd });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "CNS upload failed.");
+        return;
+      }
+      setEvents(hydrateEvents(data));
+      setCnsFileName(file.name);
+      invalidateAnalysis();
+    } catch {
+      setError("Network error uploading CNS file.");
+    } finally {
+      setUploadingCns(false);
+    }
+  };
+
+  const runAnalysis = () => {
+    setAnalysisRunning(true);
+    setError(null);
+    setResolveEmails(null);
+    try {
+      const pre = Math.max(1, Math.min(365, Number(preDays) || 30));
+      const post = Math.max(1, Math.min(365, Number(postDays) || 30));
+      const result = analyzeDecomImpact({
+        shutdowns,
+        events,
+        timeZone,
+        preDays: pre,
+        postDays: post,
+        minPostWhenPrePositive: Math.max(0, Number(minPostPos) || 3),
+        minRatioWhenPrePositive: Math.max(1, Number(minRatio) || 2),
+        minPostWhenPreZero: Math.max(0, Number(minPostZero) || 5),
+        analysisRunDate: new Date(),
+      });
+      setAnalysis(result);
+      const flaggedIds = result.sites.filter((s) => s.flagged).map((s) => s.fuzeSiteId);
+      setSelectedReinstate(new Set(flaggedIds));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Analysis failed.");
+    } finally {
+      setAnalysisRunning(false);
+    }
+  };
 
   const chartData = useMemo(() => {
-    if (!result) return [];
-    return result.sites
+    if (!analysis) return [];
+    return analysis.sites
       .filter((s) => s.flagged)
       .map((s) => ({
-        name:
-          s.fuzeSiteId.length > 14
-            ? `${s.fuzeSiteId.slice(0, 12)}…`
-            : s.fuzeSiteId,
+        name: s.fuzeSiteId.length > 14 ? `${s.fuzeSiteId.slice(0, 12)}…` : s.fuzeSiteId,
         fullId: s.fuzeSiteId,
         pre: s.preTotal,
         post: s.postTotal,
       }));
-  }, [result]);
+  }, [analysis]);
 
-  const toggleSelect = (fuze: string) => {
-    setSelectedFlagged((prev) => {
+  const flaggedSites = useMemo(
+    () => analysis?.sites.filter((s) => s.flagged) ?? [],
+    [analysis]
+  );
+
+  const toggleReinstate = (fuze: string) => {
+    setSelectedReinstate((prev) => {
       const n = new Set(prev);
       if (n.has(fuze)) n.delete(fuze);
       else n.add(fuze);
@@ -190,41 +309,26 @@ export function DecomDashboard() {
   };
 
   const selectAllFlagged = () => {
-    if (!result) return;
-    const flagged = result.sites.filter((s) => s.flagged).map((s) => s.fuzeSiteId);
-    setSelectedFlagged(new Set(flagged));
+    setSelectedReinstate(new Set(flaggedSites.map((s) => s.fuzeSiteId)));
   };
 
-  const generateEmails = async () => {
-    if (!result) return;
-    const flaggedSites = result.sites.filter(
-      (s) => s.flagged && selectedFlagged.has(s.fuzeSiteId)
+  const clearReinstate = () => setSelectedReinstate(new Set());
+
+  const generateResolveEmails = () => {
+    if (!analysis) return;
+    const chosen = analysis.sites.filter(
+      (s) => s.flagged && selectedReinstate.has(s.fuzeSiteId)
     );
-    if (flaggedSites.length === 0) {
-      setError("Select at least one flagged site for the email simulation.");
+    if (chosen.length === 0) {
+      setError("Select at least one flagged site for reinstatement outreach.");
+      setResolveEmails(null);
       return;
     }
-    setEmailLoading(true);
     setError(null);
-    try {
-      const res = await fetch("/api/decom/simulate-email", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sites: flaggedSites }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error ?? "Email simulation failed.");
-        setEmails(null);
-        return;
-      }
-      setEmails(data.emails ?? []);
-    } catch {
-      setError("Network error during email simulation.");
-      setEmails(null);
-    } finally {
-      setEmailLoading(false);
-    }
+    const emails = buildSimulatedEmails(chosen, {
+      appName: "mmWave reinstatement / exceptions review",
+    });
+    setResolveEmails(emails);
   };
 
   const copyText = async (text: string) => {
@@ -235,169 +339,73 @@ export function DecomDashboard() {
     }
   };
 
+  const goNext = () => setStep((s) => Math.min(5, s + 1));
+  const goBack = () => setStep((s) => Math.max(1, s - 1));
+
+  const canNext =
+    step === 1
+      ? shutdowns.length > 0
+      : step === 2
+        ? events.length > 0
+        : step === 3
+          ? analysis != null
+          : step === 4
+            ? flaggedSites.length >= 0
+            : true;
+
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-8">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+      <div className="space-y-1 border-b border-border pb-6">
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Analysis insights
+        </p>
+        <h1 className="text-2xl font-semibold tracking-tight">
+          mmWave decom &amp; customer signal impact
+        </h1>
+        <p className="max-w-2xl text-sm text-muted-foreground">
+          Five-step workflow: decom data → CNS data → thresholds &amp; analysis → validate
+          reinstatement → outreach preview.{" "}
+          <Link href="/" className="font-medium text-primary underline-offset-4 hover:underline">
+            Introduction
+          </Link>
+        </p>
+      </div>
+
+      {/* Stepper */}
+      <nav aria-label="Workflow steps" className="flex flex-col gap-3">
+        <ol className="flex flex-wrap items-center gap-1 text-xs sm:text-sm">
+          {STEPS.map((s, i) => (
+            <li key={s.n} className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => {
+                  if (s.n <= step || (s.n === 4 && analysis) || (s.n === 5 && analysis))
+                    setStep(s.n);
+                }}
+                className={
+                  step === s.n
+                    ? "flex items-center gap-1.5 rounded-sm border border-primary bg-primary px-2.5 py-1.5 font-medium text-primary-foreground"
+                    : s.n < step || (s.n === 4 && analysis) || (s.n === 5 && analysis)
+                      ? "flex items-center gap-1.5 rounded-sm border border-border px-2.5 py-1.5 text-muted-foreground hover:bg-muted"
+                      : "flex items-center gap-1.5 rounded-sm border border-transparent px-2.5 py-1.5 text-muted-foreground/50"
+                }
+              >
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-background/20 text-[10px] font-bold sm:text-xs">
+                  {s.n}
+                </span>
+                <span className="hidden sm:inline">{s.short}</span>
+              </button>
+              {i < STEPS.length - 1 ? (
+                <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+              ) : null}
+            </li>
+          ))}
+        </ol>
         <div>
-          <div className="mb-3">
-            <BrandLogos variant="welcome" />
-          </div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            mmWave decom &amp; customer signal impact
-          </h1>
-          <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-            Upload the latest <strong>mmWave shutdown</strong> extract and{" "}
-            <strong>CNS / NRB</strong> extract (joined by Fuze site ID). Run
-            analysis to compare pin volume before versus after each shutdown.
-            Post windows are clamped to today in your selected timezone.
-          </p>
+          <h2 className="text-lg font-semibold">{STEPS[step - 1]?.title}</h2>
+          <p className="text-sm text-muted-foreground">{STEPS[step - 1]?.desc}</p>
         </div>
-      </div>
-
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <FileSpreadsheet className="h-4 w-4" aria-hidden />
-              Decom / mmWave shutdowns
-            </CardTitle>
-            <CardDescription>
-              Excel workbook (.xlsx) with Fuze site ID and shutdown date.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <Input
-              ref={decomInputRef}
-              type="file"
-              accept=".xlsx,.xls"
-              className="cursor-pointer"
-              onChange={(e) => {
-                const f = e.target.files?.[0] ?? null;
-                setDecomFile(f);
-              }}
-            />
-            {decomFile && (
-              <p className="text-xs text-muted-foreground">
-                Selected: {decomFile.name}
-                {lastRunAt ? ` · last run ${formatTime(lastRunAt)}` : ""}
-              </p>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <FileSpreadsheet className="h-4 w-4" aria-hidden />
-              CNS pins &amp; NRB tickets
-            </CardTitle>
-            <CardDescription>
-              Excel workbook with Fuze site ID and event dates near decom sites.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <Input
-              ref={cnsInputRef}
-              type="file"
-              accept=".xlsx,.xls"
-              className="cursor-pointer"
-              onChange={(e) => {
-                const f = e.target.files?.[0] ?? null;
-                setCnsFile(f);
-              }}
-            />
-            {cnsFile && (
-              <p className="text-xs text-muted-foreground">
-                Selected: {cnsFile.name}
-                {lastRunAt ? ` · last run ${formatTime(lastRunAt)}` : ""}
-              </p>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Analysis controls</CardTitle>
-          <CardDescription>
-            Windows and thresholds apply to the <strong>total</strong> count
-            (CNS + NRB). Tune values to match your NA review standard.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <div className="space-y-2">
-            <Label htmlFor="preDays">Pre window (days)</Label>
-            <Input
-              id="preDays"
-              inputMode="numeric"
-              value={preDays}
-              onChange={(e) => setPreDays(e.target.value)}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="postDays">Post window (days)</Label>
-            <Input
-              id="postDays"
-              inputMode="numeric"
-              value={postDays}
-              onChange={(e) => setPostDays(e.target.value)}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="tz">Timezone (IANA)</Label>
-            <Input
-              id="tz"
-              value={timeZone}
-              onChange={(e) => setTimeZone(e.target.value)}
-              placeholder="America/New_York"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="minPostPos">Min post count (pre &gt; 0)</Label>
-            <Input
-              id="minPostPos"
-              inputMode="numeric"
-              value={minPostPos}
-              onChange={(e) => setMinPostPos(e.target.value)}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="minRatio">Min post/pre ratio (pre &gt; 0)</Label>
-            <Input
-              id="minRatio"
-              inputMode="decimal"
-              value={minRatio}
-              onChange={(e) => setMinRatio(e.target.value)}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="minPostZero">Min post count (pre = 0)</Label>
-            <Input
-              id="minPostZero"
-              inputMode="numeric"
-              value={minPostZero}
-              onChange={(e) => setMinPostZero(e.target.value)}
-            />
-          </div>
-        </CardContent>
-        <CardContent className="border-t border-border pt-6">
-          <div className="flex flex-wrap items-center gap-3">
-            <Button disabled={!canRun} onClick={runAnalysis}>
-              {loading ? (
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-              ) : (
-                <Play className="h-4 w-4" aria-hidden />
-              )}
-              Run analysis
-            </Button>
-            {!decomFile || !cnsFile ? (
-              <span className="text-xs text-muted-foreground">
-                Select both workbooks to enable Run.
-              </span>
-            ) : null}
-          </div>
-        </CardContent>
-      </Card>
+      </nav>
 
       {error && (
         <div
@@ -405,61 +413,324 @@ export function DecomDashboard() {
           role="alert"
         >
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-          <span>{error}</span>
+          <span className="whitespace-pre-wrap break-words">{error}</span>
         </div>
       )}
 
-      {result && (
-        <>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <Kpi
-              label="Decom sites"
-              value={String(result.summary.decomSiteCount)}
-            />
-            <Kpi
-              label="Sites with any pins"
-              value={String(result.summary.sitesWithEvents)}
-            />
-            <Kpi
-              label="Flagged (impact rule)"
-              value={String(result.summary.flaggedCount)}
-            />
-            <Kpi
-              label="CNS rows (no shutdown match)"
-              value={String(result.summary.unmatchedEventCount)}
-            />
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Pin date span (matched Fuze IDs):{" "}
-            {result.summary.pinDateMin ?? "—"} →{" "}
-            {result.summary.pinDateMax ?? "—"} · Post window clamped to{" "}
-            {result.appliedConfig.postWindowClampYmd} ({result.appliedConfig.timeZone}
-            )
-          </p>
-
-          {result.warnings.length > 0 && (
-            <Card className="border-amber-500/40 bg-amber-500/5">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-amber-900 dark:text-amber-100">
-                  Data quality
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <ul className="list-inside list-disc space-y-1 text-sm text-amber-950/90 dark:text-amber-50/90">
-                  {result.warnings.map((w, i) => (
-                    <li key={i}>{w}</li>
+      {/* Step 1 */}
+      {step === 1 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <FileSpreadsheet className="h-4 w-4" aria-hidden />
+              Decommissioned sites
+            </CardTitle>
+            <CardDescription>
+              Sample shutdown rows load by default. Replace with your extract (.xlsx) anytime.
+              {decomFileName ? (
+                <span className="mt-1 block font-medium text-foreground">
+                  Current file: {decomFileName}
+                </span>
+              ) : (
+                <span className="mt-1 block">Using built-in sample data.</span>
+              )}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex flex-wrap gap-2">
+              <Input
+                type="file"
+                accept=".xlsx,.xls"
+                className="max-w-sm cursor-pointer"
+                disabled={uploadingDecom}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) void uploadDecom(f);
+                  e.target.value = "";
+                }}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setShutdowns(getDefaultShutdowns());
+                  setDecomFileName(null);
+                  invalidateAnalysis();
+                }}
+              >
+                <RotateCcw className="h-4 w-4" aria-hidden />
+                Reset to sample data
+              </Button>
+            </div>
+            {uploadingDecom ? (
+              <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                Parsing workbook…
+              </p>
+            ) : null}
+            <Separator />
+            <ScrollArea className="h-[min(360px,50vh)] w-full rounded-md border border-border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Fuze site ID</TableHead>
+                    <TableHead>Shutdown date</TableHead>
+                    <TableHead>NA engineer</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {shutdowns.map((r) => (
+                    <TableRow key={r.fuzeSiteId}>
+                      <TableCell className="font-mono text-xs">{r.fuzeSiteId}</TableCell>
+                      <TableCell className="text-xs">
+                        {r.shutdownDate.toISOString().slice(0, 10)}
+                      </TableCell>
+                      <TableCell className="max-w-[200px] truncate text-xs">
+                        {r.naEngineerEmail ?? r.naEngineerName ?? "—"}
+                      </TableCell>
+                    </TableRow>
                   ))}
-                </ul>
-              </CardContent>
-            </Card>
-          )}
+                </TableBody>
+              </Table>
+            </ScrollArea>
+            <p className="text-xs text-muted-foreground">
+              {shutdowns.length} site(s) in working set.
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
+      {/* Step 2 */}
+      {step === 2 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <FileSpreadsheet className="h-4 w-4" aria-hidden />
+              CNS pins &amp; NRB tickets
+            </CardTitle>
+            <CardDescription>
+              Sample customer-signal rows load by default. Upload your extract to replace them.
+              {cnsFileName ? (
+                <span className="mt-1 block font-medium text-foreground">
+                  Current file: {cnsFileName}
+                </span>
+              ) : (
+                <span className="mt-1 block">Using built-in sample data.</span>
+              )}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex flex-wrap gap-2">
+              <Input
+                type="file"
+                accept=".xlsx,.xls"
+                className="max-w-sm cursor-pointer"
+                disabled={uploadingCns}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) void uploadCns(f);
+                  e.target.value = "";
+                }}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setEvents(getDefaultCnsEvents());
+                  setCnsFileName(null);
+                  invalidateAnalysis();
+                }}
+              >
+                <RotateCcw className="h-4 w-4" aria-hidden />
+                Reset to sample data
+              </Button>
+            </div>
+            {uploadingCns ? (
+              <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                Parsing workbook…
+              </p>
+            ) : null}
+            <Separator />
+            <ScrollArea className="h-[min(360px,50vh)] w-full rounded-md border border-border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Fuze site ID</TableHead>
+                    <TableHead>Event date</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Id</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {events.slice(0, 200).map((r, idx) => (
+                    <TableRow key={`${r.fuzeSiteId}-${idx}-${r.externalId ?? ""}`}>
+                      <TableCell className="font-mono text-xs">{r.fuzeSiteId}</TableCell>
+                      <TableCell className="text-xs">
+                        {r.eventDate.toISOString().slice(0, 10)}
+                      </TableCell>
+                      <TableCell className="text-xs">{r.kind}</TableCell>
+                      <TableCell className="text-xs">{r.externalId ?? "—"}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </ScrollArea>
+            <p className="text-xs text-muted-foreground">
+              Showing {Math.min(200, events.length)} of {events.length} row(s).
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Step 3 */}
+      {step === 3 && (
+        <div className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Analysis parameters</CardTitle>
+              <CardDescription>
+                Windows and thresholds apply to <strong>total</strong> pins (CNS + NRB). Changing
+                any value clears the last run until you analyze again.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="space-y-2">
+                <Label htmlFor="preDays">Pre window (days)</Label>
+                <Input
+                  id="preDays"
+                  inputMode="numeric"
+                  value={preDays}
+                  onChange={(e) => {
+                    setPreDays(e.target.value);
+                    onThresholdChange();
+                  }}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="postDays">Post window (days)</Label>
+                <Input
+                  id="postDays"
+                  inputMode="numeric"
+                  value={postDays}
+                  onChange={(e) => {
+                    setPostDays(e.target.value);
+                    onThresholdChange();
+                  }}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="tz">Timezone (IANA)</Label>
+                <Input
+                  id="tz"
+                  value={timeZone}
+                  onChange={(e) => {
+                    setTimeZone(e.target.value);
+                    onThresholdChange();
+                  }}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="minPostPos">Min post count (pre &gt; 0)</Label>
+                <Input
+                  id="minPostPos"
+                  inputMode="numeric"
+                  value={minPostPos}
+                  onChange={(e) => {
+                    setMinPostPos(e.target.value);
+                    onThresholdChange();
+                  }}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="minRatio">Min post/pre ratio (pre &gt; 0)</Label>
+                <Input
+                  id="minRatio"
+                  inputMode="decimal"
+                  value={minRatio}
+                  onChange={(e) => {
+                    setMinRatio(e.target.value);
+                    onThresholdChange();
+                  }}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="minPostZero">Min post count (pre = 0)</Label>
+                <Input
+                  id="minPostZero"
+                  inputMode="numeric"
+                  value={minPostZero}
+                  onChange={(e) => {
+                    setMinPostZero(e.target.value);
+                    onThresholdChange();
+                  }}
+                />
+              </div>
+            </CardContent>
+            <CardContent className="border-t border-border pt-6">
+              <Button type="button" onClick={runAnalysis} disabled={analysisRunning}>
+                {analysisRunning ? (
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                ) : (
+                  <Play className="h-4 w-4" aria-hidden />
+                )}
+                Run analysis
+              </Button>
+              {!analysis ? (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Run analysis to enable the next step.
+                </p>
+              ) : (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Last run: {new Date(analysis.appliedConfig.analysisRunIso).toLocaleString()} ·{" "}
+                  {analysis.summary.flaggedCount} site(s) flagged.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+
+          {analysis && (
+            <>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <Kpi label="Decom sites" value={String(analysis.summary.decomSiteCount)} />
+                <Kpi
+                  label="Sites with pins"
+                  value={String(analysis.summary.sitesWithEvents)}
+                />
+                <Kpi label="Flagged" value={String(analysis.summary.flaggedCount)} />
+                <Kpi
+                  label="Unmatched CNS rows"
+                  value={String(analysis.summary.unmatchedEventCount)}
+                />
+              </div>
+              {analysis.warnings.length > 0 && (
+                <Card className="border-amber-500/40 bg-amber-500/5">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium">Data quality</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <ul className="list-inside list-disc space-y-1 text-sm">
+                      {analysis.warnings.map((w, i) => (
+                        <li key={i}>{w}</li>
+                      ))}
+                    </ul>
+                  </CardContent>
+                </Card>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Step 4 */}
+      {step === 4 && analysis && (
+        <div className="space-y-6">
           {chartData.length > 0 && (
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">
-                  Flagged sites — pre vs post totals
-                </CardTitle>
+                <CardTitle className="text-base">Flagged sites — pre vs post</CardTitle>
               </CardHeader>
               <CardContent className="h-80">
                 <ResponsiveContainer width="100%" height="100%">
@@ -480,224 +751,212 @@ export function DecomDashboard() {
           <Card>
             <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <CardTitle className="text-base">Site results</CardTitle>
+                <CardTitle className="text-base">Reinstatement validation</CardTitle>
                 <CardDescription>
-                  {result.summary.shutdownsWithNoEvents} site(s) have zero pins in
-                  file. Use the filter to hide them if needed.
+                  Flagged sites only. Checked sites will be included in the step 5 outreach
+                  preview (exceptions / reactivation consideration).
                 </CardDescription>
               </div>
-              <div className="flex flex-wrap items-center gap-3">
-                <label className="flex cursor-pointer items-center gap-2 text-sm">
-                  <Checkbox
-                    checked={onlyWithPins}
-                    onCheckedChange={(c) => setOnlyWithPins(c === true)}
-                  />
-                  Only sites with pins
-                </label>
+              <div className="flex flex-wrap gap-2">
                 <Button type="button" variant="outline" size="sm" onClick={selectAllFlagged}>
                   Select all flagged
+                </Button>
+                <Button type="button" variant="outline" size="sm" onClick={clearReinstate}>
+                  Clear all
                 </Button>
               </div>
             </CardHeader>
             <CardContent>
-              <ScrollArea className="w-full">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-10" />
-                      <TableHead>Fuze site ID</TableHead>
-                      <TableHead>Shutdown</TableHead>
-                      <TableHead className="text-right">Pre</TableHead>
-                      <TableHead className="text-right">Post</TableHead>
-                      <TableHead className="text-right">CNS</TableHead>
-                      <TableHead className="text-right">NRB</TableHead>
-                      <TableHead>NA engineer</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="w-24">Pins</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredSites.map((row) => (
-                      <TableRow key={row.fuzeSiteId}>
-                        <TableCell>
-                          {row.flagged ? (
-                            <Checkbox
-                              checked={selectedFlagged.has(row.fuzeSiteId)}
-                              onCheckedChange={() => toggleSelect(row.fuzeSiteId)}
-                              aria-label={`Select ${row.fuzeSiteId}`}
-                            />
-                          ) : null}
-                        </TableCell>
-                        <TableCell className="font-mono text-xs">
-                          {row.fuzeSiteId}
-                        </TableCell>
-                        <TableCell className="text-xs">{row.shutdownDate}</TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {row.preTotal}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {row.postTotal}
-                        </TableCell>
-                        <TableCell className="text-right text-xs tabular-nums text-muted-foreground">
-                          {row.preCns}/{row.postCns}
-                        </TableCell>
-                        <TableCell className="text-right text-xs tabular-nums text-muted-foreground">
-                          {row.preNrb}/{row.postNrb}
-                        </TableCell>
-                        <TableCell className="max-w-[140px] truncate text-xs">
-                          {row.naEngineerEmail ?? row.naEngineerName ?? "—"}
-                        </TableCell>
-                        <TableCell>
-                          {row.flagged ? (
-                            <Badge variant="destructive">Flagged</Badge>
-                          ) : (
-                            <Badge variant="secondary">OK</Badge>
-                          )}
-                          {row.eventsTruncated ? (
-                            <span className="ml-1 text-[10px] text-amber-700">
-                              truncated
-                            </span>
-                          ) : null}
-                        </TableCell>
-                        <TableCell>
-                          {row.events && row.events.length > 0 ? (
-                            <Dialog>
-                              <DialogTrigger asChild>
-                                <Button variant="ghost" size="sm" className="h-8 px-2 text-xs">
-                                  {row.events.length} pin(s)
-                                </Button>
-                              </DialogTrigger>
-                              <DialogContent className="max-h-[85vh] max-w-lg">
-                                <DialogHeader>
-                                  <DialogTitle>
-                                    Pins — {row.fuzeSiteId}
-                                  </DialogTitle>
-                                </DialogHeader>
-                                <ScrollArea className="max-h-[55vh] pr-3">
-                                  <Table>
-                                    <TableHeader>
-                                      <TableRow>
-                                        <TableHead className="w-24">Type</TableHead>
-                                        <TableHead>When (UTC)</TableHead>
-                                        <TableHead>Id</TableHead>
-                                      </TableRow>
-                                    </TableHeader>
-                                    <TableBody>
-                                      {row.events.map((ev, j) => (
-                                        <TableRow key={j}>
-                                          <TableCell className="text-xs">
-                                            {ev.type}
-                                          </TableCell>
-                                          <TableCell className="font-mono text-xs">
-                                            {ev.date}
-                                          </TableCell>
-                                          <TableCell className="text-xs">
-                                            {ev.id ?? "—"}
-                                          </TableCell>
-                                        </TableRow>
-                                      ))}
-                                    </TableBody>
-                                  </Table>
-                                </ScrollArea>
-                              </DialogContent>
-                            </Dialog>
-                          ) : (
-                            <span className="text-xs text-muted-foreground">—</span>
-                          )}
-                        </TableCell>
+              {flaggedSites.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No sites met the impact thresholds. Adjust step 3 and run analysis again, or
+                  upload richer extracts.
+                </p>
+              ) : (
+                <ScrollArea className="w-full">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-12">Include</TableHead>
+                        <TableHead>Fuze site ID</TableHead>
+                        <TableHead>Shutdown</TableHead>
+                        <TableHead className="text-right">Pre</TableHead>
+                        <TableHead className="text-right">Post</TableHead>
+                        <TableHead>Reason</TableHead>
+                        <TableHead className="w-24">Pins</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </ScrollArea>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <Mail className="h-4 w-4" aria-hidden />
-                Simulated email
-              </CardTitle>
-              <CardDescription>
-                Not sent — preview only. Messages group by NA engineer email when
-                present in the decom file. Use checkboxes in the table to choose
-                flagged sites.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-wrap gap-3">
-              <Button
-                type="button"
-                variant="secondary"
-                disabled={emailLoading || result.summary.flaggedCount === 0}
-                onClick={generateEmails}
-              >
-                {emailLoading ? (
-                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                ) : (
-                  <Mail className="h-4 w-4" aria-hidden />
-                )}
-                Generate preview
-              </Button>
-            </CardContent>
-            {emails && emails.length > 0 && (
-              <CardContent className="space-y-6 border-t border-border pt-6">
-                {emails.map((em, idx) => (
-                  <div key={idx} className="space-y-2 rounded-md border border-border p-4">
-                    <p className="text-xs font-medium text-muted-foreground">
-                      To
-                    </p>
-                    <p className="font-mono text-sm">{em.to}</p>
-                    <p className="text-xs font-medium text-muted-foreground">
-                      Subject
-                    </p>
-                    <p className="text-sm">{em.subject}</p>
-                    <div className="flex flex-wrap gap-2 pt-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => copyText(em.textBody)}
-                      >
-                        Copy plain text
-                      </Button>
-                      <Dialog>
-                        <DialogTrigger asChild>
-                          <Button type="button" variant="outline" size="sm">
-                            View HTML
-                          </Button>
-                        </DialogTrigger>
-                        <DialogContent className="max-h-[85vh] max-w-3xl">
-                          <DialogHeader>
-                            <DialogTitle>HTML preview</DialogTitle>
-                          </DialogHeader>
-                          <ScrollArea className="max-h-[60vh] rounded-md border border-border p-3">
-                            <div
-                              className="prose prose-sm max-w-none dark:prose-invert"
-                              dangerouslySetInnerHTML={{ __html: em.htmlBody }}
+                    </TableHeader>
+                    <TableBody>
+                      {flaggedSites.map((row) => (
+                        <TableRow key={row.fuzeSiteId}>
+                          <TableCell>
+                            <Checkbox
+                              checked={selectedReinstate.has(row.fuzeSiteId)}
+                              onCheckedChange={() => toggleReinstate(row.fuzeSiteId)}
+                              aria-label={`Include ${row.fuzeSiteId}`}
                             />
-                          </ScrollArea>
-                        </DialogContent>
-                      </Dialog>
-                    </div>
-                  </div>
-                ))}
-              </CardContent>
-            )}
+                          </TableCell>
+                          <TableCell className="font-mono text-xs">{row.fuzeSiteId}</TableCell>
+                          <TableCell className="text-xs">{row.shutdownDate}</TableCell>
+                          <TableCell className="text-right tabular-nums">{row.preTotal}</TableCell>
+                          <TableCell className="text-right tabular-nums">{row.postTotal}</TableCell>
+                          <TableCell className="max-w-[240px] text-xs text-muted-foreground">
+                            {row.flagReason ?? "—"}
+                          </TableCell>
+                          <TableCell>
+                            {row.events && row.events.length > 0 ? (
+                              <Dialog>
+                                <DialogTrigger asChild>
+                                  <Button variant="ghost" size="sm" className="h-8 px-2 text-xs">
+                                    {row.events.length} pin(s)
+                                  </Button>
+                                </DialogTrigger>
+                                <DialogContent className="max-h-[85vh] max-w-lg">
+                                  <DialogHeader>
+                                    <DialogTitle>Pins — {row.fuzeSiteId}</DialogTitle>
+                                  </DialogHeader>
+                                  <ScrollArea className="max-h-[55vh] pr-3">
+                                    <Table>
+                                      <TableHeader>
+                                        <TableRow>
+                                          <TableHead>Type</TableHead>
+                                          <TableHead>When (UTC)</TableHead>
+                                          <TableHead>Id</TableHead>
+                                        </TableRow>
+                                      </TableHeader>
+                                      <TableBody>
+                                        {row.events.map((ev, j) => (
+                                          <TableRow key={j}>
+                                            <TableCell className="text-xs">{ev.type}</TableCell>
+                                            <TableCell className="font-mono text-xs">
+                                              {ev.date}
+                                            </TableCell>
+                                            <TableCell className="text-xs">
+                                              {ev.id ?? "—"}
+                                            </TableCell>
+                                          </TableRow>
+                                        ))}
+                                      </TableBody>
+                                    </Table>
+                                  </ScrollArea>
+                                </DialogContent>
+                              </Dialog>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </ScrollArea>
+              )}
+            </CardContent>
           </Card>
-        </>
+        </div>
       )}
-    </div>
-  );
-}
 
-function Kpi({ label, value }: { label: string; value: string }) {
-  return (
-    <Card>
-      <CardHeader className="pb-2">
-        <CardDescription>{label}</CardDescription>
-        <CardTitle className="text-2xl tabular-nums">{value}</CardTitle>
-      </CardHeader>
-    </Card>
+      {/* Step 5 */}
+      {step === 5 && analysis && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Send className="h-4 w-4" aria-hidden />
+              Resolve — simulated NA outreach
+            </CardTitle>
+            <CardDescription>
+              Generates preview emails for engineers tied to the sites you checked in step 4.
+              Nothing is sent automatically.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-wrap gap-3">
+            <Button
+              type="button"
+              variant="default"
+              disabled={selectedReinstate.size === 0}
+              onClick={generateResolveEmails}
+            >
+              <Mail className="h-4 w-4" aria-hidden />
+              Generate outreach preview
+            </Button>
+            <p className="w-full text-xs text-muted-foreground">
+              {selectedReinstate.size} site(s) selected for outreach payload.
+            </p>
+          </CardContent>
+          {resolveEmails && resolveEmails.length > 0 && (
+            <CardContent className="space-y-6 border-t border-border pt-6">
+              {resolveEmails.map((em, idx) => (
+                <div
+                  key={idx}
+                  className="space-y-2 rounded-md border border-border p-4"
+                >
+                  <p className="text-xs font-medium text-muted-foreground">To</p>
+                  <p className="font-mono text-sm">{em.to}</p>
+                  <p className="text-xs font-medium text-muted-foreground">Subject</p>
+                  <p className="text-sm">{em.subject}</p>
+                  <div className="flex flex-wrap gap-2 pt-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => copyText(em.textBody)}
+                    >
+                      Copy plain text
+                    </Button>
+                    <Dialog>
+                      <DialogTrigger asChild>
+                        <Button type="button" variant="outline" size="sm">
+                          View HTML
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent className="max-h-[85vh] max-w-3xl">
+                        <DialogHeader>
+                          <DialogTitle>HTML preview</DialogTitle>
+                        </DialogHeader>
+                        <ScrollArea className="max-h-[60vh] rounded-md border border-border p-3">
+                          <div
+                            className="prose prose-sm max-w-none dark:prose-invert"
+                            dangerouslySetInnerHTML={{ __html: em.htmlBody }}
+                          />
+                        </ScrollArea>
+                      </DialogContent>
+                    </Dialog>
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+          )}
+        </Card>
+      )}
+
+      {/* Nav footer */}
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-6">
+        <Button
+          type="button"
+          variant="outline"
+          onClick={goBack}
+          disabled={step <= 1}
+        >
+          <ArrowLeft className="h-4 w-4" aria-hidden />
+          Back
+        </Button>
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          {analysis && step >= 3 ? (
+            <span className="inline-flex items-center gap-1">
+              <Check className="h-3.5 w-3.5 text-primary" aria-hidden />
+              Analysis ready
+            </span>
+          ) : null}
+        </div>
+        <Button
+          type="button"
+          onClick={goNext}
+          disabled={!canNext || step >= 5}
+        >
+          Next
+          <ArrowRight className="h-4 w-4" aria-hidden />
+        </Button>
+      </div>
+    </div>
   );
 }
