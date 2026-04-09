@@ -1,5 +1,5 @@
 /**
- * Runs aggregation + LLM-merge (demo payload) and rule-based analysis on embedded defaults.
+ * Runs aggregation + offline merge payload and rule-based analysis on embedded defaults.
  * Usage: npx --yes tsx --tsconfig tsconfig.json scripts/test-analysis-defaults.ts
  */
 import { getDefaultCnsRollups, getDefaultShutdowns } from "../src/data/workflow-defaults";

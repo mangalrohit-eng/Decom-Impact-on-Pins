@@ -72,8 +72,8 @@ export function OperationsDashboardCharts({ data }: Props) {
           <p className="max-w-3xl text-sm leading-relaxed text-muted-foreground">
             Live snapshot from your active feeds (inventory + CNS/NRB warehouse). NID series uses{" "}
             <strong className="font-medium text-foreground">NRB</strong> rows. Reinstatement
-            candidates align with the same post-decom spike logic as guided analysis when generative
-            review is off. For site-level narrative, open{" "}
+            candidates use the same post-decom spike correlation as site-level analysis. For
+            narrative detail, open{" "}
             <strong className="font-medium text-foreground">Analysis</strong>.
           </p>
           <p className="text-xs text-muted-foreground">{data.windowNote}</p>

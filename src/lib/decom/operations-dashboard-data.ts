@@ -1,6 +1,6 @@
 /**
  * Chart-ready aggregates for the operations dashboard (from current default feeds).
- * Default feeds mirror the public dummy workbooks (rollup CNS + mmWave shutdown extract).
+ * Default feeds mirror the bundled sample workbooks (rollup CNS + mmWave shutdown extract).
  */
 import { addDays, differenceInCalendarDays } from "date-fns";
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz";

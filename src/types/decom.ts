@@ -104,6 +104,6 @@ export type AnalyzeResponse = {
   llmReasoning?: string;
   /** Short headline from the model (LLM path) */
   llmOverview?: string;
-  /** True when LLM credentials were unavailable and heuristic fallback was used */
+  /** True when the LLM API was unavailable and the correlation-engine path was used */
   demoMode?: boolean;
 };

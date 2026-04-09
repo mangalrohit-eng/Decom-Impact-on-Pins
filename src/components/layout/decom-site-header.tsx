@@ -49,7 +49,7 @@ export function DecomSiteHeader({ className }: { className?: string }) {
       <div className="flex shrink-0 items-center gap-2">
         <span
           className="inline-flex items-center gap-1.5 rounded-full border border-primary/20 bg-gradient-to-r from-primary/[0.08] via-primary/[0.06] to-[hsl(220_70%_42%/0.08)] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.15em] text-primary shadow-sm"
-          title="Generative reasoning and draft composition when the managed model is enabled"
+          title="AI-assisted reasoning and outreach drafts"
         >
           <Sparkles className="h-3.5 w-3.5" aria-hidden strokeWidth={2} />
           <span className="hidden sm:inline">Gen-AI ready</span>

@@ -163,10 +163,14 @@ export async function POST(req: Request) {
       };
 
       try {
+        send({ type: "activity", phase: "thinking" });
+
         if (!process.env.OPENAI_API_KEY?.trim()) {
           const reasoning = buildDemoReasoningText(agg);
           const payload = buildDemoLlmPayload(agg);
+          send({ type: "activity", phase: "reasoning" });
           await streamReasoningChunks(send, reasoning, 4, 12);
+          send({ type: "activity", phase: "sites" });
           const merged = mergeLlmIntoAggregate(base, payload, {
             analystNotes,
             llmModel: "heuristic-fallback",
@@ -223,7 +227,9 @@ export async function POST(req: Request) {
         }
 
         const narrative = reasoning || payload.overview || "";
+        send({ type: "activity", phase: "reasoning" });
         await streamReasoningChunks(send, narrative, 6, 6);
+        send({ type: "activity", phase: "sites" });
 
         const merged = mergeLlmIntoAggregate(base, payload, {
           analystNotes,

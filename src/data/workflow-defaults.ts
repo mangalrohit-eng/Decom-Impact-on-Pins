@@ -1,6 +1,10 @@
 import type { CnsRollupRow, ShutdownRow } from "@/types/decom";
-import dummyCnsRollups from "./dummy-cns-rollups.json";
-import dummyShutdowns from "./dummy-shutdowns.json";
+import {
+  SAMPLE_CNS_WORKBOOK_FILENAME,
+  SAMPLE_DECOM_WORKBOOK_FILENAME,
+} from "@/lib/decom/sample-workbook-names";
+import defaultCnsRollups from "./default-cns-rollups.json";
+import defaultShutdowns from "./default-shutdowns.json";
 
 /** Scheduled inventory feed when no file upload is present. */
 export const DECOM_FEED_SNAPSHOT = {
@@ -15,11 +19,14 @@ export const CNS_FEED_SNAPSHOT = {
   pulledAtIso: "2026-04-08T06:12:00.000Z",
 } as const;
 
+export { SAMPLE_CNS_WORKBOOK_FILENAME, SAMPLE_DECOM_WORKBOOK_FILENAME };
+
 /**
- * Default decom rows: same columns as `public/Dummy data - Date of mmWave Shutdowns by Site.xlsx`.
+ * Default decom rows (bundled snapshot). Column layout matches the mmWave shutdown
+ * sample workbook filename exported as SAMPLE_DECOM_WORKBOOK_FILENAME.
  */
 export function getDefaultShutdowns(): ShutdownRow[] {
-  return (dummyShutdowns as Array<Record<string, string>>).map((row) => ({
+  return (defaultShutdowns as Array<Record<string, string>>).map((row) => ({
     fuzeSiteId: String(row.fuzeSiteId),
     shutdownDate: new Date(row.shutdownDate),
     region: row.region || undefined,
@@ -31,11 +38,11 @@ export function getDefaultShutdowns(): ShutdownRow[] {
 }
 
 /**
- * Default CNS rows: warehouse rollup matching
- * `public/Dummy data - CNS Pins and NRB Tix Near Decom Sites.xlsx`.
+ * Default CNS rollup rows (bundled snapshot). Layout matches the CNS sample workbook filename
+ * exported as SAMPLE_CNS_WORKBOOK_FILENAME.
  */
 export function getDefaultCnsRollups(): CnsRollupRow[] {
-  return (dummyCnsRollups as Array<Record<string, string | number>>).map(
+  return (defaultCnsRollups as Array<Record<string, string | number>>).map(
     (row) => ({
       fuzeSiteId: String(row.fuzeSiteId),
       rptDt: new Date(String(row.rptDt)),

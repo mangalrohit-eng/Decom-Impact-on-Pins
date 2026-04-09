@@ -59,7 +59,7 @@ const WHY_TRY = [
   {
     icon: Sparkles,
     title: "Judgment when you want it",
-    text: "Optional generative review narrates tradeoffs; you keep approval gates for escalation and external mail.",
+    text: "AI review narrates tradeoffs; you keep approval gates for escalation and external mail.",
   },
 ] as const;
 
@@ -71,7 +71,7 @@ const WHAT_IT_DOES = [
   },
   {
     icon: Sparkles,
-    title: "Applies generative AI for review",
+    title: "AI-assisted review",
     text: "A configured **LLM interprets** pre/post patterns (with streamed rationale where enabled) and **prioritizes sites** that may warrant exceptions or reinstatement discussion — alongside your written guidance.",
   },
   {
@@ -92,7 +92,7 @@ const FLOW_STEPS = [
   {
     step: "02",
     title: "AI reads the pattern",
-    body: "The model reviews pre- vs post-shutdown pin volume per site, streams reasoning when enabled, and flags sites that may be driving customer pain — tuned to your notes, not fixed ratio rules alone.",
+    body: "The model reviews pre- vs post-shutdown pin volume per site, streams its reasoning, and flags sites that may be driving customer pain — tuned to your notes, not fixed ratio rules alone.",
     ai: "Reasoning, prioritization, concern levels, narrative overview.",
     human: "You set calendar windows, timezone, and optional analyst instructions.",
   },
@@ -324,9 +324,8 @@ export default function HomePage() {
             </h2>
             <p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted-foreground">
               Extracts must share <strong className="font-medium text-foreground">Fuze site ID</strong>.
-              When your deployment has generative-model credentials configured, {APP_NAME} uses the
-              managed LLM path; otherwise it uses the standard correlation engine so sessions stay
-              productive without the cloud model.
+              {APP_NAME} runs AI-guided analysis on your working set, with a correlation-engine path
+              available when the model service is unreachable so you can still inspect signals.
             </p>
             <div className="mt-8 space-y-0">
               {FLOW_STEPS.map((item, i) => (
@@ -377,12 +376,11 @@ export default function HomePage() {
         </CardHeader>
         <CardContent className="space-y-3 text-sm leading-relaxed text-muted-foreground">
           <p>
-            Session processing: uploads are handled per request; persistent storage of customer data
-            in this deployment depends on your environment configuration. Ask your platform
-            administrator to enable the managed generative path when your tenant should use cloud
-            model reasoning. When that path is off, {APP_NAME} runs the{" "}
-            <strong className="text-foreground">standard correlation engine</strong> so analysis
-            and dashboards remain available.
+            Session processing: uploads are handled per request; how long customer data is retained
+            depends on your environment configuration. If the model service is unavailable,{" "}
+            {APP_NAME} can still run the{" "}
+            <strong className="text-foreground">correlation engine</strong> so analysis and
+            dashboards stay usable.
           </p>
           <p>
             <strong className="text-foreground">Outreach:</strong> Generated content is internal draft

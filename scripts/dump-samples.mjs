@@ -6,6 +6,13 @@ import * as XLSX from "xlsx";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pub = path.join(__dirname, "../public");
 
+const CANDIDATES = [
+  "Sample-mmWave-shutdowns-by-site.xlsx",
+  "Dummy data - Date of mmWave Shutdowns by Site.xlsx",
+  "Sample-CNS-pins-and-NRB-near-decom.xlsx",
+  "Dummy data - CNS Pins and NRB Tix Near Decom Sites.xlsx",
+];
+
 function dump(name) {
   const buf = fs.readFileSync(path.join(pub, name));
   const wb = XLSX.read(buf, { type: "buffer", cellDates: true, raw: false });
@@ -23,5 +30,7 @@ function dump(name) {
   }
 }
 
-dump("Dummy data - Date of mmWave Shutdowns by Site.xlsx");
-dump("Dummy data - CNS Pins and NRB Tix Near Decom Sites.xlsx");
+for (const name of CANDIDATES) {
+  const p = path.join(pub, name);
+  if (fs.existsSync(p)) dump(name);
+}

@@ -1,5 +1,5 @@
 /**
- * Offline fallback when the managed generative model is not configured for this deployment.
+ * Offline fallback when the LLM API is not configured (correlation-style merge only).
  * Produces narrative + structured decisions from the same aggregated facts (not rule thresholds).
  */
 import type { AggregatedAnalyzeResponse } from "@/lib/decom/aggregate-windows";
@@ -40,14 +40,14 @@ export function buildDemoLlmPayload(
   const flagged = sites.filter((x) => x.flagged);
   const overview =
     flagged.length === 0
-      ? "No sites met the heuristic spike criteria in this run. Enable the managed generative model for this deployment for full narrative analysis."
-      : `${flagged.length} site(s) show elevated post-decom customer signals under the correlation engine. Enable the managed generative model for richer reasoning.`;
+      ? "No sites met the correlation spike criteria in this run."
+      : `${flagged.length} site(s) show elevated post-decom customer signals under the correlation engine.`;
   return { overview, sites };
 }
 
 export function buildDemoReasoningText(agg: AggregatedAnalyzeResponse): string {
   const lines = [
-    "Analysis engine: heuristic fallback (LLM service credentials not configured).",
+    "Analysis engine: correlation path (LLM service not available for this session).",
     "",
     `Reviewing ${agg.summary.decomSiteCount} decommissioned sites with ${agg.summary.sitesWithEvents} sites carrying CNS/NRB activity.`,
     `Unmatched pin rows (no matching Fuze in decom file): ${agg.summary.unmatchedEventCount}.`,

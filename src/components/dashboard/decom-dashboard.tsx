@@ -37,6 +37,8 @@ import {
 import {
   CNS_FEED_SNAPSHOT,
   DECOM_FEED_SNAPSHOT,
+  SAMPLE_CNS_WORKBOOK_FILENAME,
+  SAMPLE_DECOM_WORKBOOK_FILENAME,
   getDefaultCnsRollups,
   getDefaultShutdowns,
 } from "@/data/workflow-defaults";
@@ -347,7 +349,7 @@ function displayAnalysisEngineLabel(llmModel?: string): string {
   const m = llmModel.toLowerCase();
   if (m === "heuristic-fallback" || m.includes("heuristic")) return "Correlation engine";
   if (m.includes("vz-ne-correlation") || m.endsWith("-correlation-v1")) return "Correlation engine";
-  return "Generative model";
+  return "AI model";
 }
 
 export function DecomDashboard() {
@@ -370,6 +372,9 @@ export function DecomDashboard() {
   const [analysis, setAnalysis] = useState<AnalyzeResponse | null>(null);
   const [analysisRunning, setAnalysisRunning] = useState(false);
   const [reasoningLog, setReasoningLog] = useState("");
+  const [analysisActivityPhase, setAnalysisActivityPhase] = useState<
+    null | "thinking" | "reasoning" | "sites"
+  >(null);
 
   const [selectedReinstate, setSelectedReinstate] = useState<Set<string>>(new Set());
   const [resolveRecipients, setResolveRecipients] = useState<ResolveRecipientRow[] | null>(
@@ -505,6 +510,7 @@ export function DecomDashboard() {
 
   const runAnalysis = async () => {
     setAnalysisRunning(true);
+    setAnalysisActivityPhase("thinking");
     setError(null);
     setResolveRecipients(null);
     setReasoningLog("");
@@ -551,6 +557,7 @@ export function DecomDashboard() {
           if (!line.startsWith("data: ")) continue;
           let data: {
             type?: string;
+            phase?: string;
             text?: string;
             analysis?: AnalyzeResponse;
             message?: string;
@@ -560,8 +567,15 @@ export function DecomDashboard() {
           } catch {
             continue;
           }
+          if (data.type === "activity") {
+            const p = data.phase;
+            if (p === "thinking" || p === "reasoning" || p === "sites") {
+              setAnalysisActivityPhase(p);
+            }
+          }
           if (data.type === "reasoning" && typeof data.text === "string") {
             setReasoningLog((prev) => prev + data.text);
+            setAnalysisActivityPhase((cur) => (cur === "sites" ? cur : "reasoning"));
           }
           if (data.type === "error") {
             throw new Error(data.message ?? "Stream error");
@@ -586,6 +600,7 @@ export function DecomDashboard() {
       setError(e instanceof Error ? e.message : "Analysis failed.");
     } finally {
       setAnalysisRunning(false);
+      setAnalysisActivityPhase(null);
     }
   };
 
@@ -759,6 +774,21 @@ export function DecomDashboard() {
 
   const displayedReasoning =
     analysis?.llmReasoning && !analysisRunning ? analysis.llmReasoning : reasoningLog;
+
+  const analysisActivitySubtitle = (() => {
+    if (!analysisRunning) return "Final narrative from the last completed run.";
+    if (analysisActivityPhase === "thinking") return "Thinking — contacting the model…";
+    if (analysisActivityPhase === "reasoning")
+      return "Streaming how the model reads your data.";
+    if (analysisActivityPhase === "sites")
+      return "Reasoning complete — identifying site-level decisions.";
+    return "Working…";
+  })();
+
+  const showThinkingPlaceholder =
+    analysisRunning &&
+    !displayedReasoning.trim() &&
+    analysisActivityPhase !== "sites";
 
   const workflowProgress = Math.round((step / STEPS.length) * 100);
   const activeStep = STEPS[step - 1];
@@ -966,9 +996,9 @@ export function DecomDashboard() {
                       <span className="block text-xs text-muted-foreground">
                         Same rows and layout as{" "}
                         <span className="font-mono text-[11px]">
-                          Dummy data - Date of mmWave Shutdowns by Site.xlsx
+                          {SAMPLE_DECOM_WORKBOOK_FILENAME}
                         </span>
-                        . Upload to replace; download sample for that file.
+                        . Upload to replace, or download that sample workbook.
                       </span>
                     </>
                   )}
@@ -1165,7 +1195,7 @@ export function DecomDashboard() {
                       <span className="block text-xs text-muted-foreground">
                         Same rows as{" "}
                         <span className="font-mono text-[11px]">
-                          Dummy data - CNS Pins and NRB Tix Near Decom Sites.xlsx
+                          {SAMPLE_CNS_WORKBOOK_FILENAME}
                         </span>
                         . Analysis sums TOTAL_PIN_COUNT and TOTAL_NRB_TICKETS into pre/post windows
                         by RPT_DT. Upload a per-pin extract to switch to row-counting mode.
@@ -1406,14 +1436,6 @@ export function DecomDashboard() {
 
       {step === 3 && (
         <div className="space-y-6">
-          {analysis?.demoMode ? (
-            <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-950 dark:text-amber-100">
-              <strong>Correlation-engine mode.</strong> The managed generative model is not enabled
-              for this deployment. Output below uses the on-platform correlation engine; enable the
-              generative path for full narrative review.
-            </div>
-          ) : null}
-
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
@@ -1506,26 +1528,57 @@ export function DecomDashboard() {
           {(analysisRunning || displayedReasoning) && (
             <Card className="rounded-2xl border-primary/25 bg-gradient-to-b from-primary/[0.06] via-muted/30 to-card shadow-premium">
               <CardHeader className="pb-2">
-                <div className="flex items-center gap-2">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-sm border border-primary/30 bg-primary/10">
+                <div className="flex w-full items-start gap-2">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-sm border border-primary/30 bg-primary/10">
                     <Sparkles className="h-4 w-4 text-primary" aria-hidden />
                   </div>
-                  <div>
+                  <div className="min-w-0 flex-1">
                     <CardTitle className="text-sm font-medium">Model reasoning</CardTitle>
-                    <CardDescription>
-                      {analysisRunning
-                        ? "Live stream — how the model reads the data."
-                        : "Final narrative from the last completed run."}
-                    </CardDescription>
+                    <CardDescription>{analysisActivitySubtitle}</CardDescription>
                   </div>
+                  {analysisRunning ? (
+                    <Loader2
+                      className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-primary"
+                      aria-hidden
+                    />
+                  ) : null}
                 </div>
               </CardHeader>
-              <CardContent>
+              <CardContent className="space-y-3">
                 <ScrollArea className="h-[min(280px,40vh)] w-full rounded-md border border-border/80 bg-background/90 p-4">
-                  <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-foreground/90">
-                    {displayedReasoning || (analysisRunning ? "…" : "")}
-                  </pre>
+                  <div
+                    className="space-y-2"
+                    role="status"
+                    aria-live="polite"
+                    aria-busy={analysisRunning}
+                  >
+                    {showThinkingPlaceholder ? (
+                      <p
+                        className={cn(
+                          "font-mono text-sm italic text-muted-foreground",
+                          "motion-safe:animate-pulse"
+                        )}
+                      >
+                        Thinking…
+                      </p>
+                    ) : null}
+                    {displayedReasoning ? (
+                      <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-foreground/90">
+                        {displayedReasoning}
+                      </pre>
+                    ) : null}
+                  </div>
                 </ScrollArea>
+                {analysisRunning && analysisActivityPhase === "sites" ? (
+                  <div
+                    className="flex items-center gap-2 rounded-md border border-primary/20 bg-primary/[0.06] px-3 py-2.5 text-sm text-muted-foreground"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" aria-hidden />
+                    <span>Finding specific sites… please wait.</span>
+                  </div>
+                ) : null}
               </CardContent>
             </Card>
           )}
@@ -1723,9 +1776,8 @@ export function DecomDashboard() {
             <CardDescription>
               Build drafts from your validated site list (one message per NA contact). Review each
               message, then use <strong className="font-medium text-foreground">Send email</strong>{" "}
-              to simulate dispatch (production mail still goes through your client per NE policy).
-              When the generative path is enabled for this deployment, copy is model-generated;
-              otherwise the standard template applies.
+              to simulate dispatch. Draft copy is produced by the model; production mail still goes
+              through your client per NE policy.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
@@ -1751,8 +1803,8 @@ export function DecomDashboard() {
             ) : null}
             {emailsDemo ? (
               <p className="text-xs text-muted-foreground">
-                Structured template mode — enable the managed generative path for model-written
-                correspondence.
+                These drafts use the structured template because the email model was unavailable for
+                this request.
               </p>
             ) : null}
             <div className="flex flex-wrap gap-3">
@@ -1900,9 +1952,9 @@ export function DecomDashboard() {
         <CardHeader className="pb-2">
           <CardTitle className="text-sm font-semibold">Operational context</CardTitle>
           <CardDescription className="text-xs leading-relaxed">
-            {APP_NAME} pairs decommission and customer-signal extracts with optional generative
-            review and structured NA drafts. Analyst approval and external mail stay in Outlook per
-            Verizon NE controls.
+            {APP_NAME} pairs decommission and customer-signal data with AI-assisted review and NA
+            outreach drafts. Analyst approval and external mail stay in Outlook per Verizon NE
+            controls.
           </CardDescription>
         </CardHeader>
       </Card>

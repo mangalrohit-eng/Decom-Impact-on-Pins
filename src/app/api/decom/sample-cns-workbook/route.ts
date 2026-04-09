@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { SAMPLE_CNS_WORKBOOK_FILENAME } from "@/lib/decom/sample-workbook-names";
 import { buildSampleCnsWorkbookBuffer } from "@/lib/decom/sample-workbook-buffers";
 
 export const dynamic = "force-dynamic";
@@ -10,8 +11,7 @@ export async function GET() {
     headers: {
       "Content-Type":
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      "Content-Disposition":
-        'attachment; filename="Dummy data - CNS Pins and NRB Tix Near Decom Sites.xlsx"',
+      "Content-Disposition": `attachment; filename="${SAMPLE_CNS_WORKBOOK_FILENAME}"`,
       "Cache-Control": "private, max-age=60",
     },
   });
