@@ -23,6 +23,7 @@ import {
   CheckCircle2,
   ChevronRight,
   ClipboardCheck,
+  Download,
   FileSpreadsheet,
   Loader2,
   Mail,
@@ -85,6 +86,7 @@ import type {
   ShutdownRow,
   SiteAnalysisRow,
 } from "@/types/decom";
+import { APP_NAME } from "@/config/app-brand";
 import { PremiumDotGrid } from "@/components/visual/premium-mesh";
 
 type StepDef = {
@@ -640,24 +642,24 @@ export function DecomDashboard() {
                   className="rounded-full border border-primary/15 bg-primary/10 font-medium text-primary"
                 >
                   <Sparkles className="mr-1 h-3.5 w-3.5" aria-hidden strokeWidth={2} />
-                  LLM-assisted operations
+                  {APP_NAME} · Guided run
                 </Badge>
                 <Badge variant="outline" className="rounded-full font-mono text-xs font-normal">
                   Step {step} / {STEPS.length}
                 </Badge>
               </div>
               <h1 className="font-display text-2xl font-bold tracking-tight text-foreground sm:text-3xl md:text-4xl">
-                mmWave decom &amp;{" "}
-                <span className="text-primary">customer signal</span> impact
+                <span className="text-primary">{APP_NAME}</span>
+                {" — "}mmWave decom &amp; customer experience
               </h1>
               <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground sm:text-base">
-                LLM-supported interpretation, prioritization, and outreach composition — with analysts
-                validating every escalation.{" "}
+                Correlate shutdowns with CNS/NRB in minutes, validate reinstatement candidates, and ship
+                NA-ready drafts—always with analyst sign-off.{" "}
                 <Link
                   href="/"
                   className="font-semibold text-primary underline-offset-4 hover:underline"
                 >
-                  Home &amp; guide
+                  Product overview
                 </Link>
               </p>
             </div>
@@ -814,7 +816,8 @@ export function DecomDashboard() {
                       Working set replaced by{" "}
                       <span className="font-mono text-xs">{decomFileName}</span>. Column layout
                       matches the standard decom workbook (Fuze Site ID, Shutdown Date, NA Engineer
-                      Email, NA Engineer Name).
+                      Email, NA Engineer Name). You can still download the sample .xlsx to share the
+                      format or compare structure.
                     </span>
                   ) : (
                     <>
@@ -829,7 +832,8 @@ export function DecomDashboard() {
                       </span>
                       <span className="block text-xs text-muted-foreground">
                         Rows below use the same fields as the decom .xlsx template. Upload a
-                        workbook to replace this sync; add row appends to the current set.
+                        workbook to replace this sync; add row appends to the current set. Download
+                        sample format for the exact column layout and the same rows as this feed.
                       </span>
                     </>
                   )}
@@ -895,6 +899,16 @@ export function DecomDashboard() {
                     </DialogFooter>
                   </DialogContent>
                 </Dialog>
+                <Button asChild variant="outline" size="sm">
+                  <a
+                    href="/api/decom/sample-decom-workbook"
+                    download
+                    className="inline-flex items-center gap-1.5"
+                  >
+                    <Download className="h-4 w-4" aria-hidden />
+                    Sample format (.xlsx)
+                  </a>
+                </Button>
                 <Input
                   type="file"
                   accept=".xlsx,.xls"
@@ -987,7 +1001,8 @@ export function DecomDashboard() {
                     <span className="font-medium text-foreground">
                       Working set replaced by{" "}
                       <span className="font-mono text-xs">{cnsFileName}</span>. Column layout
-                      matches the standard CNS workbook (Fuze Site ID, Pin Date, Type, Pin ID).
+                      matches the standard CNS workbook (Fuze Site ID, Pin Date, Type, Pin ID). You
+                      can still download the sample .xlsx for the format and default feed rows.
                     </span>
                   ) : (
                     <>
@@ -1002,7 +1017,8 @@ export function DecomDashboard() {
                       </span>
                       <span className="block text-xs text-muted-foreground">
                         Rows mirror the CNS / NRB .xlsx extract. Upload your file to replace this
-                        pull; add row appends to the current set.
+                        pull; add row appends to the current set. Download sample format for columns
+                        and the same rows as this warehouse pull.
                       </span>
                     </>
                   )}
@@ -1074,6 +1090,16 @@ export function DecomDashboard() {
                     </DialogFooter>
                   </DialogContent>
                 </Dialog>
+                <Button asChild variant="outline" size="sm">
+                  <a
+                    href="/api/decom/sample-cns-workbook"
+                    download
+                    className="inline-flex items-center gap-1.5"
+                  >
+                    <Download className="h-4 w-4" aria-hidden />
+                    Sample format (.xlsx)
+                  </a>
+                </Button>
                 <Input
                   type="file"
                   accept=".xlsx,.xls"
@@ -1635,9 +1661,9 @@ export function DecomDashboard() {
         <CardHeader className="pb-2">
           <CardTitle className="text-sm font-semibold">Operational context</CardTitle>
           <CardDescription className="text-xs leading-relaxed">
-            This module pairs decommission and customer-signal extracts with LLM-assisted review
-            and draft NA communications. Analyst approval and external mail delivery remain outside
-            this application per standard NE controls.
+            {APP_NAME} pairs decommission and customer-signal extracts with optional generative
+            review and structured NA drafts. Analyst approval and external mail stay in Outlook per
+            Verizon NE controls.
           </CardDescription>
         </CardHeader>
       </Card>

@@ -8,6 +8,7 @@ import { DecomSidebarNav } from "@/components/layout/decom-sidebar-nav";
 import { DecomSiteHeader } from "@/components/layout/decom-site-header";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import { APP_NAME, APP_TAGLINE } from "@/config/app-brand";
 import { cn } from "@/lib/utils";
 
 function SidebarChrome({
@@ -32,7 +33,10 @@ function SidebarChrome({
               Verizon Wireless · NE
             </p>
           <p className="font-display truncate text-sm font-semibold tracking-tight text-white">
-            Decom · CNS impact
+            {APP_NAME}
+          </p>
+          <p className="line-clamp-2 text-[10px] font-medium leading-snug tracking-wide text-zinc-500">
+            {APP_TAGLINE}
           </p>
         </div>
       </Link>

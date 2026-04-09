@@ -52,7 +52,7 @@ export async function POST(req: Request) {
 
   if (!process.env.OPENAI_API_KEY?.trim()) {
     const fallback = buildSimulatedEmails(sites, {
-      appName: "mmWave reinstatement / exceptions review",
+      appName: "SignalSpan — mmWave reinstatement review",
     });
     return Response.json({
       emails: fallback,
@@ -89,7 +89,7 @@ export async function POST(req: Request) {
     let emails = parseEmailsJson(text);
     if (!emails) {
       emails = buildSimulatedEmails(sites, {
-        appName: "mmWave reinstatement / exceptions review",
+        appName: "SignalSpan — mmWave reinstatement review",
       });
       return Response.json({
         emails,

@@ -3,6 +3,7 @@ import "./globals.css";
 import type { Metadata } from "next";
 import { JetBrains_Mono, Outfit, Plus_Jakarta_Sans } from "next/font/google";
 import { DecomShell } from "@/components/layout/decom-shell";
+import { APP_METADATA_DESCRIPTION, APP_METADATA_TITLE } from "@/config/app-brand";
 
 const sans = Plus_Jakarta_Sans({
   subsets: ["latin"],
@@ -22,9 +23,8 @@ const mono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Decom & CNS impact | Verizon Wireless · Network Engineering",
-  description:
-    "Operational workspace for mmWave decommission impact: correlate CNS pins and NRB tickets by Fuze site, LLM-assisted analysis, validation, and NA outreach drafts. Internal use.",
+  title: APP_METADATA_TITLE,
+  description: APP_METADATA_DESCRIPTION,
 };
 
 export default function RootLayout({

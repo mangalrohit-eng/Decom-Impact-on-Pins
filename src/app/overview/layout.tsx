@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
+import { APP_NAME } from "@/config/app-brand";
 
 export const metadata: Metadata = {
-  title: "Operations dashboard · Decom & CNS impact | Verizon Wireless NE",
-  description:
-    "CNS pin volumes, decommission context, reinstatement signal counts, and regional NID views from operational feeds.",
+  title: `Live metrics · ${APP_NAME} | Verizon Wireless NE`,
+  description: `${APP_NAME} operations view: CNS/NRB volumes, decommission context, reinstatement candidates, and regional NID trends from your feeds.`,
 };
 
 export default function OverviewLayout({

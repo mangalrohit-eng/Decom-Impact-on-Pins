@@ -32,10 +32,9 @@ async function main() {
   const pageRes = await fetch(BASE + "/");
   if (!pageRes.ok) fail(`GET / status ${pageRes.status}`);
   const html = await pageRes.text();
-  if (!html.includes("mmWave") && !html.includes("Decom"))
-    fail("GET / HTML missing expected content");
-  if (!html.includes("Capabilities") && !html.includes("Decom impact"))
-    fail("GET / expected home content");
+  if (!html.includes("SignalSpan") && !html.includes("mmWave"))
+    fail("GET / HTML missing expected home content");
+  if (!html.includes("Capabilities")) fail("GET / missing capabilities section");
   console.log("OK  GET / (home)");
 
   // --- GET /introduction (redirects to /) ---
@@ -48,15 +47,15 @@ async function main() {
   const ovRes = await fetch(BASE + "/overview");
   if (!ovRes.ok) fail(`GET /overview status ${ovRes.status}`);
   const ovHtml = await ovRes.text();
-  if (!ovHtml.includes("Operations dashboard") || !ovHtml.includes("Daily CNS"))
+  if (!ovHtml.includes("SignalSpan") || !ovHtml.includes("Daily CNS"))
     fail("GET /overview missing dashboard content");
   console.log("OK  GET /overview");
 
   const dashRes = await fetch(BASE + "/dashboard");
   if (!dashRes.ok) fail(`GET /dashboard status ${dashRes.status}`);
   const dashHtml = await dashRes.text();
-  if (!dashHtml.includes("Analysis insights"))
-    fail("GET /dashboard missing analysis dashboard shell");
+  if (!dashHtml.includes("SignalSpan") || !dashHtml.includes("Step"))
+    fail("GET /dashboard missing analysis shell");
   console.log("OK  GET /dashboard");
 
   // --- Build minimal .xlsx fixtures ---

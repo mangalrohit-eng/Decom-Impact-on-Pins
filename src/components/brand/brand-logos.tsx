@@ -2,9 +2,9 @@ import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 type BrandLogosProps = {
-  /** Sidebar: compact row. Welcome: larger logos. */
+  /** Sidebar: compact. Welcome: larger logo. */
   variant?: "sidebar" | "welcome";
-  /** Wrap logos in external links (welcome page). */
+  /** Wrap logo in external link (welcome page). */
   withLinks?: boolean;
   className?: string;
 };
@@ -15,23 +15,9 @@ export function BrandLogos({
   className,
 }: BrandLogosProps) {
   const isSidebar = variant === "sidebar";
-  const accentureClass = isSidebar
-    ? "h-6 w-auto max-w-[108px] object-left object-contain"
-    : "h-9 w-auto max-w-[200px] object-contain sm:h-10";
   const verizonClass = isSidebar
     ? "h-6 w-auto max-w-[96px] object-left object-contain"
     : "h-9 w-auto max-w-[200px] object-contain sm:h-10";
-
-  const accenture = (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src="/accenture-logo.svg"
-      alt="Accenture"
-      className={accentureClass}
-      width={isSidebar ? 108 : 200}
-      height={isSidebar ? 28 : 52}
-    />
-  );
 
   const verizon = (
     // eslint-disable-next-line @next/next/no-img-element
@@ -44,11 +30,7 @@ export function BrandLogos({
     />
   );
 
-  const wrap = (
-    node: ReactNode,
-    href: string,
-    aria: string
-  ) =>
+  const wrap = (node: ReactNode, href: string, aria: string) =>
     withLinks ? (
       <a
         href={href}
@@ -71,14 +53,6 @@ export function BrandLogos({
         className
       )}
     >
-      {wrap(accenture, "https://www.accenture.com", "Accenture (opens in new tab)")}
-      <div
-        className={cn(
-          "shrink-0 bg-border",
-          isSidebar ? "h-5 w-px" : "h-9 w-px sm:h-10"
-        )}
-        aria-hidden
-      />
       {wrap(verizon, "https://www.verizon.com", "Verizon (opens in new tab)")}
     </div>
   );

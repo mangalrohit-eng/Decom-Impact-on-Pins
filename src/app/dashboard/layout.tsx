@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
+import { APP_NAME } from "@/config/app-brand";
 
 export const metadata: Metadata = {
-  title: "Decom & CNS analysis | Verizon Wireless NE",
-  description:
-    "Guided workflow: operational feeds, AI-assisted spike review, reinstatement validation, outreach composition.",
+  title: `Guided analysis · ${APP_NAME} | Verizon Wireless NE`,
+  description: `${APP_NAME}: five-step workflow from inventory and signal feeds through AI-assisted review, validation, and NA outreach drafts.`,
 };
 
 export default function DashboardLayout({

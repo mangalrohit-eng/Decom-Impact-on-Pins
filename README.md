@@ -76,4 +76,4 @@ Rows whose Fuze ID is not present in the decom file are counted in **CNS rows (n
 
 ## Branding
 
-Accenture / Verizon logos and theme align with the internal NE Chargeback console pattern.
+Verizon logo and theme align with internal Network Engineering tooling patterns.

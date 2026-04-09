@@ -22,6 +22,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import type { OperationsDashboardPayload } from "@/lib/decom/operations-dashboard-data";
+import { APP_NAME } from "@/config/app-brand";
 import { PremiumDotGrid } from "@/components/visual/premium-mesh";
 
 const PIN_BLUE = "hsl(221 83% 53%)";
@@ -63,17 +64,17 @@ export function OperationsDashboardCharts({ data }: Props) {
         <div className="relative space-y-2">
           <div className="inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.2em] text-muted-foreground">
             <BarChart3 className="h-4 w-4 text-primary" aria-hidden />
-            Operations dashboard
+            {APP_NAME} · Operations
           </div>
           <h1 className="font-display text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
-            CNS pins, decommissions &amp; reinstatement signals
+            Customer signals, decommissions &amp; reinstatement pressure
           </h1>
           <p className="max-w-3xl text-sm leading-relaxed text-muted-foreground">
-            Snapshot from the current working feeds (inventory sync + signal warehouse). NID pins
-            use <strong className="font-medium text-foreground">NRB</strong> records in the extract.
-            Reinstatement candidates use the same heuristic spike rules as the analysis workspace when
-            the LLM path is off. For deep review, open{" "}
-            <strong className="font-medium text-foreground">Analysis</strong> in the nav.
+            Live snapshot from your active feeds (inventory + CNS/NRB warehouse). NID series uses{" "}
+            <strong className="font-medium text-foreground">NRB</strong> rows. Reinstatement
+            candidates align with the same post-decom spike logic as guided analysis when generative
+            review is off. For site-level narrative, open{" "}
+            <strong className="font-medium text-foreground">Analysis</strong>.
           </p>
           <p className="text-xs text-muted-foreground">{data.windowNote}</p>
         </div>
@@ -86,7 +87,7 @@ export function OperationsDashboardCharts({ data }: Props) {
         <Kpi
           label="Reinstatement candidates"
           value={data.kpis.reversalCandidates}
-          sub="Heuristic spike pattern"
+          sub="Post-decom spike correlation"
         />
         <Kpi label="Unmatched pin rows" value={data.kpis.unmatchedPinRows} sub="No Fuze in decom" />
       </div>
@@ -224,8 +225,8 @@ export function OperationsDashboardCharts({ data }: Props) {
             Avg NID pins per site: pre vs post shutdown by region
           </CardTitle>
           <CardDescription>
-            Regions assigned from market mix on the decom list (illustrative grouping). Bars are
-            average NRB counts per site in 30d pre- and post-shutdown windows.
+            Regions follow the market mix on your decom roster. Bars show average NRB counts per
+            site across 30d pre- and post-shutdown windows.
           </CardDescription>
         </CardHeader>
         <CardContent className="h-[min(420px,50vh)] min-h-[320px] pt-6">

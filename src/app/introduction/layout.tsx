@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Overview (redirect) · Decom & CNS impact | Verizon Wireless NE",
+  title: "Redirect · SignalSpan | Verizon Wireless NE",
   description:
-    "This path redirects to the consolidated home page. Use Home for the full guide and Dashboard for metrics.",
+    "This URL forwards to the SignalSpan home page. Use Home for the full guide and Dashboard for live metrics.",
 };
 
 export default function IntroductionLayout({
