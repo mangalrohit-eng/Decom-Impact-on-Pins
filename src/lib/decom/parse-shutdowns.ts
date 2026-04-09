@@ -1,4 +1,5 @@
 import type { ShutdownRow } from "@/types/decom";
+import { findColumnIndex } from "./column-map";
 import { parseExcelCellToDate } from "./parse-dates";
 import {
   getCellByIndex,
@@ -40,6 +41,13 @@ export function parseShutdownsBuffer(buffer: Buffer): ParseShutdownsResult {
 
   warnings.push(...table.warnings);
 
+  const labels = table.headerLabels;
+  const colRegion = findColumnIndex(labels, ["region", "REGION"]);
+  const colMarket = findColumnIndex(labels, ["market", "MARKET"]);
+  const colStand = findColumnIndex(labels, ["StandAlon", "Standalone", "STANDALON"]);
+  const colMmw = findColumnIndex(labels, ["ALL MMw", "ALL MMwave", "ALL MMW"]);
+  const colShutFlag = findColumnIndex(labels, ["Shutdown", "SHUTDOWN"]);
+
   const raw: ShutdownRow[] = [];
   for (let i = 0; i < table.dataRows.length; i++) {
     const dr = table.dataRows[i] ?? [];
@@ -72,11 +80,23 @@ export function parseShutdownsBuffer(buffer: Buffer): ParseShutdownsResult {
       if (n != null && String(n).trim()) naEngineerName = String(n).trim();
     }
 
+    const cellStr = (col: number) => {
+      if (col < 0) return undefined;
+      const v = getCellByIndex(dr, col);
+      const t = v != null ? String(v).trim() : "";
+      return t || undefined;
+    };
+
     raw.push({
       fuzeSiteId: fuze,
       shutdownDate: sd,
       naEngineerEmail,
       naEngineerName,
+      region: cellStr(colRegion),
+      market: cellStr(colMarket),
+      standAlone: cellStr(colStand),
+      allMmw: cellStr(colMmw),
+      shutdownFlag: cellStr(colShutFlag),
     });
   }
 

@@ -56,6 +56,7 @@ export function workbookToRows(buffer: Buffer): {
 export function findShutdownTableInWorkbook(buffer: Buffer): {
   sheetName: string;
   headerRowIndex: number;
+  headerLabels: string[];
   colFuze: number;
   colDate: number;
   colEmail: number;
@@ -95,6 +96,7 @@ export function findShutdownTableInWorkbook(buffer: Buffer): {
       return {
         sheetName,
         headerRowIndex: r,
+        headerLabels: row,
         colFuze,
         colDate,
         colEmail,

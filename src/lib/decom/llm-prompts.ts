@@ -1,18 +1,22 @@
 import type { AggregatedAnalyzeResponse } from "@/lib/decom/aggregate-windows";
 
-export const LLM_ANALYSIS_SYSTEM = `You are a senior wireless network operations analyst. Your job is to review mmWave site decommission dates and customer-reported signals (CNS pins and NRB tickets) in pre- vs post-shutdown time windows.
+/**
+ * Used with OpenAI `response_format: { type: "json_object" }` — entire model output must be one JSON object.
+ */
+export const LLM_ANALYSIS_SYSTEM = `You are a senior wireless network operations analyst. You review mmWave site decommission dates and customer-reported signals (CNS pins and NRB tickets) in pre- vs post-shutdown time windows.
 
-You must:
-1. Write clear, professional reasoning first (what you looked at, how you interpret spikes, caveats about correlation vs causation).
-2. Then output a machine-readable JSON block after the exact delimiter line: ###RESULT###
-3. After the delimiter, output ONLY valid JSON (no markdown fences) with this shape:
-{"overview":"one or two sentences","sites":[{"fuzeSiteId":"string","flagged":true|false,"rationale":"short justification","concernLevel":"high"|"medium"|"low"|"none"}]}
+You MUST respond with a single JSON object only (no markdown, no prose outside JSON). The JSON must have exactly these top-level keys:
+- "reasoning": string — multi-paragraph professional narrative: what you examined, how you read pre/post patterns, caveats about correlation vs causation, and how you applied judgment.
+- "overview": string — one or two sentences suitable as an executive headline.
+- "sites": array — one object per site from the user data, in any order, with this shape per element:
+  {"fuzeSiteId":"string","flagged":boolean,"rationale":"short justification","concernLevel":"high"|"medium"|"low"|"none"}
 
 Rules:
-- You MUST include one object in "sites" for EVERY fuzeSiteId listed in the user data (same ids, no extras).
-- "flagged" means: the pattern suggests this decommission may be associated with a meaningful post-shutdown customer signal increase worth NA/engineering review for possible reinstatement or exceptions — use judgment, not a fixed formula.
-- Be conservative: if data is thin or ambiguous, set flagged false and explain.
-- concernLevel "none" when not flagged.`;
+- "fuzeSiteId" must match the user payload exactly as a JSON string (e.g. "6165310432"). You may use quoted strings even if the id looks numeric.
+- Include EVERY fuzeSiteId from the user "sites" list with no omissions and no extra ids.
+- "flagged" true means the pattern suggests this decommission may be associated with a meaningful post-shutdown customer signal increase worth NA/engineering review for possible reinstatement or exceptions — use judgment, not a fixed formula.
+- Be conservative when data is thin or ambiguous; set flagged false and explain in rationale.
+- concernLevel must be "none" when not flagged.`;
 
 export function buildAnalysisUserPrompt(
   agg: AggregatedAnalyzeResponse,
@@ -30,17 +34,25 @@ export function buildAnalysisUserPrompt(
     naEngineerEmail: s.naEngineerEmail ?? null,
   }));
 
+  const feedNote =
+    agg.appliedConfig.cnsFeedKind === "rollup"
+      ? "CNS feed is a warehouse rollup: pre/post CNS totals sum TOTAL_PIN_COUNT from rows whose RPT_DT falls in each window; NRB totals sum TOTAL_NRB_TICKETS the same way (not per-pin row counts)."
+      : "CNS feed is per-pin / per-ticket rows: pre/post totals count rows in each window by type.";
+
   const payload = {
     timeZone: agg.appliedConfig.timeZone,
     preWindowDays: agg.appliedConfig.preDays,
     postWindowDays: agg.appliedConfig.postDays,
     postWindowClampedToYmd: agg.appliedConfig.postWindowClampYmd,
+    cnsFeedKind: agg.appliedConfig.cnsFeedKind ?? "events",
     summary: agg.summary,
     sites: compactSites,
     analystNotes: analystNotes.trim() || null,
   };
 
-  return `Analyze the following aggregated data (counts are facts; you decide which decommissions merit follow-up).
+  return `Analyze the following aggregated data (counts are facts; you decide which decommissions merit follow-up). Return your answer as the JSON object described in the system message.
+
+${feedNote}
 
 ${JSON.stringify(payload, null, 2)}`;
 }

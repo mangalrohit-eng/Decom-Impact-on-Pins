@@ -82,14 +82,14 @@ export function OperationsDashboardCharts({ data }: Props) {
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <Kpi label="Decommissioned sites" value={data.kpis.decomSiteCount} />
-        <Kpi label="Pin / ticket rows" value={data.kpis.pinRowCount} sub="CNS + NRB" />
-        <Kpi label="Sites with pins" value={data.kpis.sitesWithPins} />
+        <Kpi label="CNS feed rows" value={data.kpis.pinRowCount} sub="Rollup or per-pin" />
+        <Kpi label="Sites with signal" value={data.kpis.sitesWithPins} />
         <Kpi
           label="Reinstatement candidates"
           value={data.kpis.reversalCandidates}
           sub="Post-decom spike correlation"
         />
-        <Kpi label="Unmatched pin rows" value={data.kpis.unmatchedPinRows} sub="No Fuze in decom" />
+        <Kpi label="Unmatched CNS rows" value={data.kpis.unmatchedPinRows} sub="No Fuze in decom" />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">

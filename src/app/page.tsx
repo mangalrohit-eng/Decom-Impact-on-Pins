@@ -25,7 +25,7 @@ import { APP_NAME, APP_TAGLINE, APP_VALUE_PITCH } from "@/config/app-brand";
 import { PremiumDotGrid, PremiumMesh } from "@/components/visual/premium-mesh";
 
 const HERO_IMAGE =
-  "https://images.unsplash.com/photo-1451187580459-43490279c940?auto=format&fit=crop&w=2000&q=80";
+  "https://images.unsplash.com/photo-1446776877081-d282a0f896e2?auto=format&fit=crop&w=2000&q=80";
 
 const HERO_STATS = [
   {
@@ -138,7 +138,7 @@ export default function HomePage() {
         <div className="absolute inset-0">
           <Image
             src={HERO_IMAGE}
-            alt=""
+            alt="Earth from orbit, soft blue atmosphere"
             fill
             priority
             className="object-cover object-center opacity-40"

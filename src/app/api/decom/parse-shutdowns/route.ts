@@ -28,6 +28,11 @@ export async function POST(request: Request) {
         shutdownDate: r.shutdownDate.toISOString(),
         naEngineerEmail: r.naEngineerEmail,
         naEngineerName: r.naEngineerName,
+        region: r.region,
+        market: r.market,
+        standAlone: r.standAlone,
+        allMmw: r.allMmw,
+        shutdownFlag: r.shutdownFlag,
       })),
       warnings,
     });

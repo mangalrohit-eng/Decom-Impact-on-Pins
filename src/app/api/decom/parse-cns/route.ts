@@ -21,13 +21,27 @@ export async function POST(request: Request) {
 
   try {
     const buf = Buffer.from(await file.arrayBuffer());
-    const { events, warnings } = parseCnsBuffer(buf);
+    const { feedKind, events, rollups, warnings } = parseCnsBuffer(buf);
     return NextResponse.json({
+      feedKind,
       events: events.map((e) => ({
         fuzeSiteId: e.fuzeSiteId,
         eventDate: e.eventDate.toISOString(),
         kind: e.kind,
         externalId: e.externalId,
+      })),
+      rollups: rollups.map((r) => ({
+        fuzeSiteId: r.fuzeSiteId,
+        rptDt: r.rptDt.toISOString(),
+        market: r.market,
+        lteMarketId: r.lteMarketId,
+        lteMarketName: r.lteMarketName,
+        totalPinCount: r.totalPinCount,
+        nidPinCount: r.nidPinCount,
+        internalPinCount: r.internalPinCount,
+        totalNrbTickets: r.totalNrbTickets,
+        networkNrbCount: r.networkNrbCount,
+        dataRelatedNrbCount: r.dataRelatedNrbCount,
       })),
       warnings,
     });

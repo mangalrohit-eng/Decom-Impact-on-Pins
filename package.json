@@ -9,7 +9,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test:analysis": "npx --yes tsx --tsconfig tsconfig.json scripts/test-analysis-defaults.ts",
+    "test:llm": "node scripts/smoke-llm-analyze.mjs"
   },
   "dependencies": {
     "@radix-ui/react-avatar": "^1.1.11",

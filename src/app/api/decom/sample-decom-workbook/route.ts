@@ -11,7 +11,7 @@ export async function GET() {
       "Content-Type":
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       "Content-Disposition":
-        'attachment; filename="sample-mmWave-decom-sites.xlsx"',
+        'attachment; filename="Dummy data - Date of mmWave Shutdowns by Site.xlsx"',
       "Cache-Control": "private, max-age=60",
     },
   });

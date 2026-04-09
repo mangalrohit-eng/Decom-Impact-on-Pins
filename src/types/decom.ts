@@ -7,17 +7,42 @@ export type CnsEventRow = {
   externalId?: string;
 };
 
+/** EDW-style rollup: one row per Fuze per report date with counts (not per-pin events). */
+export type CnsRollupRow = {
+  fuzeSiteId: string;
+  rptDt: Date;
+  market?: string;
+  lteMarketId?: string;
+  lteMarketName?: string;
+  totalPinCount: number;
+  nidPinCount: number;
+  internalPinCount: number;
+  totalNrbTickets: number;
+  networkNrbCount: number;
+  dataRelatedNrbCount: number;
+};
+
+export type CnsFeedKind = "events" | "rollup";
+
 export type ShutdownRow = {
   fuzeSiteId: string;
   shutdownDate: Date;
   naEngineerEmail?: string;
   naEngineerName?: string;
+  /** Columns from mmWave shutdown extract (when present). */
+  region?: string;
+  market?: string;
+  standAlone?: string;
+  allMmw?: string;
+  shutdownFlag?: string;
 };
 
 export type SiteEventDetail = {
   id?: string;
   date: string;
   type: EventKind;
+  /** Rollup snapshot description when feed is warehouse rollup. */
+  note?: string;
 };
 
 export type SiteAnalysisRow = {
@@ -66,6 +91,8 @@ export type AppliedConfig = {
   minPostWhenPrePositive?: number;
   minRatioWhenPrePositive?: number;
   minPostWhenPreZero?: number;
+  /** How CNS/NRB signal rows were interpreted for aggregation */
+  cnsFeedKind?: CnsFeedKind;
 };
 
 export type AnalyzeResponse = {

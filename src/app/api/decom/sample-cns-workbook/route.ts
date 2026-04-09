@@ -11,7 +11,7 @@ export async function GET() {
       "Content-Type":
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       "Content-Disposition":
-        'attachment; filename="sample-CNS-NRB-pins.xlsx"',
+        'attachment; filename="Dummy data - CNS Pins and NRB Tix Near Decom Sites.xlsx"',
       "Cache-Control": "private, max-age=60",
     },
   });

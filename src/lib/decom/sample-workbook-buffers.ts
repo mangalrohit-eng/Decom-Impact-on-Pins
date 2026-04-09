@@ -1,30 +1,20 @@
-import * as XLSX from "xlsx";
-import { getDefaultCnsEvents, getDefaultShutdowns } from "@/data/workflow-defaults";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
-/** Column layout matches `parse-shutdowns` / standard decom template. */
-export function buildSampleDecomWorkbookBuffer(): Buffer {
-  const rows = getDefaultShutdowns().map((s) => ({
-    "Fuze Site ID": s.fuzeSiteId,
-    "Shutdown Date": s.shutdownDate.toISOString().slice(0, 10),
-    "NA Engineer Email": s.naEngineerEmail ?? "",
-    "NA Engineer Name": s.naEngineerName ?? "",
-  }));
-  const sheet = XLSX.utils.json_to_sheet(rows);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, sheet, "mmWave decom sites");
-  return XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;
+const DECOM_DUMMY = "Dummy data - Date of mmWave Shutdowns by Site.xlsx";
+const CNS_DUMMY = "Dummy data - CNS Pins and NRB Tix Near Decom Sites.xlsx";
+
+function readPublicXlsx(name: string): Buffer {
+  const p = path.join(process.cwd(), "public", name);
+  return fs.readFileSync(p);
 }
 
-/** Column layout matches `parse-cns` / standard CNS workbook. */
+/** Bytes of the checked-in mmWave shutdown dummy workbook (exact public sample). */
+export function buildSampleDecomWorkbookBuffer(): Buffer {
+  return readPublicXlsx(DECOM_DUMMY);
+}
+
+/** Bytes of the checked-in CNS/NRB warehouse rollup dummy workbook. */
 export function buildSampleCnsWorkbookBuffer(): Buffer {
-  const rows = getDefaultCnsEvents().map((e) => ({
-    "Fuze Site ID": e.fuzeSiteId,
-    "Pin Date": e.eventDate.toISOString().slice(0, 10),
-    Type: e.kind,
-    "Pin ID": e.externalId ?? "",
-  }));
-  const sheet = XLSX.utils.json_to_sheet(rows);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, sheet, "CNS NRB pins");
-  return XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;
+  return readPublicXlsx(CNS_DUMMY);
 }

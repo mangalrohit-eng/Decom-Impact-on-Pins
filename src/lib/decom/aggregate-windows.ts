@@ -1,6 +1,6 @@
 /**
- * Time-window aggregation of CNS/NRB events per decom site (facts only).
- * Used to feed the LLM; flagging is decided by the model, not by thresholds here.
+ * Time-window aggregation of CNS/NRB signals per decom site (facts only).
+ * Supports per-pin/event rows or EDW rollup rows (RPT_DT + pin/NRB counts).
  */
 import { addDays } from "date-fns";
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
@@ -8,6 +8,8 @@ import type {
   AppliedConfig,
   AnalyzeSummary,
   CnsEventRow,
+  CnsFeedKind,
+  CnsRollupRow,
   ShutdownRow,
   SiteAnalysisRow,
   SiteEventDetail,
@@ -18,7 +20,10 @@ const MAX_EVENTS_PER_SITE = 500;
 
 export type AggregateParams = {
   shutdowns: ShutdownRow[];
+  /** Per-pin / per-ticket rows (classic extract). Ignored when `rollups` is non-empty. */
   events: CnsEventRow[];
+  /** Warehouse rollup: one row per Fuze per RPT_DT with counts. */
+  rollups?: CnsRollupRow[];
   timeZone?: string;
   preDays: number;
   postDays: number;
@@ -62,22 +67,48 @@ export type AggregatedAnalyzeResponse = {
   appliedConfig: AppliedConfig;
 };
 
+function rollupSnapshotNote(r: CnsRollupRow, tz: string): string {
+  const y = ymdInTz(r.rptDt, tz);
+  return `Rollup ${y}: ${r.totalPinCount} pins (NID ${r.nidPinCount}, internal ${r.internalPinCount}); NRB tickets ${r.totalNrbTickets} (network ${r.networkNrbCount}, data-related ${r.dataRelatedNrbCount})`;
+}
+
 export function aggregateDecomWindows(p: AggregateParams): AggregatedAnalyzeResponse {
   const tz = p.timeZone ?? DEFAULT_TZ;
   const analysisClampYmd = ymdInTz(p.analysisRunDate, tz);
+  const useRollup = (p.rollups?.length ?? 0) > 0;
+  const cnsFeedKind: CnsFeedKind = useRollup ? "rollup" : "events";
 
   const shutdownFuze = new Set(p.shutdowns.map((s) => s.fuzeSiteId));
+
   let unmatchedEventCount = 0;
-  for (const e of p.events) {
-    if (!shutdownFuze.has(e.fuzeSiteId)) unmatchedEventCount += 1;
+  if (useRollup) {
+    for (const r of p.rollups!) {
+      if (!shutdownFuze.has(r.fuzeSiteId)) unmatchedEventCount += 1;
+    }
+  } else {
+    for (const e of p.events) {
+      if (!shutdownFuze.has(e.fuzeSiteId)) unmatchedEventCount += 1;
+    }
   }
 
   const eventsByFuze = new Map<string, CnsEventRow[]>();
-  for (const e of p.events) {
-    if (!shutdownFuze.has(e.fuzeSiteId)) continue;
-    const list = eventsByFuze.get(e.fuzeSiteId) ?? [];
-    list.push(e);
-    eventsByFuze.set(e.fuzeSiteId, list);
+  if (!useRollup) {
+    for (const e of p.events) {
+      if (!shutdownFuze.has(e.fuzeSiteId)) continue;
+      const list = eventsByFuze.get(e.fuzeSiteId) ?? [];
+      list.push(e);
+      eventsByFuze.set(e.fuzeSiteId, list);
+    }
+  }
+
+  const rollupsByFuze = new Map<string, CnsRollupRow[]>();
+  if (useRollup) {
+    for (const r of p.rollups!) {
+      if (!shutdownFuze.has(r.fuzeSiteId)) continue;
+      const list = rollupsByFuze.get(r.fuzeSiteId) ?? [];
+      list.push(r);
+      rollupsByFuze.set(r.fuzeSiteId, list);
+    }
   }
 
   const warnings: string[] = [];
@@ -91,47 +122,84 @@ export function aggregateDecomWindows(p: AggregateParams): AggregatedAnalyzeResp
     const rawPostEnd = addCalendarDaysYmd(shutdownYmd, p.postDays, tz);
     const postEndYmd = ymdMin(rawPostEnd, analysisClampYmd);
 
-    const list = eventsByFuze.get(s.fuzeSiteId) ?? [];
-    if (list.length > 0) sitesWithEvents += 1;
-
     let preCns = 0;
     let postCns = 0;
     let preNrb = 0;
     let postNrb = 0;
+    let details: SiteEventDetail[] = [];
+    let truncated = false;
 
-    for (const e of list) {
-      const eventYmd = ymdInTz(e.eventDate, tz);
+    if (useRollup) {
+      const list = rollupsByFuze.get(s.fuzeSiteId) ?? [];
+      if (list.length > 0) sitesWithEvents += 1;
 
-      if (eventInPreWindow(eventYmd, preStartYmd, shutdownYmd)) {
-        if (e.kind === "CNS") preCns += 1;
-        else preNrb += 1;
-      } else if (eventInPostWindow(eventYmd, shutdownYmd, postEndYmd)) {
-        if (e.kind === "CNS") postCns += 1;
-        else postNrb += 1;
+      for (const r of list) {
+        const eventYmd = ymdInTz(r.rptDt, tz);
+        if (eventInPreWindow(eventYmd, preStartYmd, shutdownYmd)) {
+          preCns += r.totalPinCount;
+          preNrb += r.totalNrbTickets;
+        } else if (eventInPostWindow(eventYmd, shutdownYmd, postEndYmd)) {
+          postCns += r.totalPinCount;
+          postNrb += r.totalNrbTickets;
+        }
       }
+
+      const sortedRollups = [...list].sort(
+        (a, b) => a.rptDt.getTime() - b.rptDt.getTime()
+      );
+      truncated = sortedRollups.length > MAX_EVENTS_PER_SITE;
+      const slice = truncated
+        ? sortedRollups.slice(-MAX_EVENTS_PER_SITE)
+        : sortedRollups;
+      if (truncated) {
+        warnings.push(
+          `Fuze ${s.fuzeSiteId}: rollup snapshot list truncated to ${MAX_EVENTS_PER_SITE} (newest) for payload size.`
+        );
+      }
+
+      details = slice.map((r) => ({
+        date: r.rptDt.toISOString(),
+        type: "CNS" as const,
+        note: rollupSnapshotNote(r, tz),
+      }));
+    } else {
+      const list = eventsByFuze.get(s.fuzeSiteId) ?? [];
+      if (list.length > 0) sitesWithEvents += 1;
+
+      for (const e of list) {
+        const eventYmd = ymdInTz(e.eventDate, tz);
+
+        if (eventInPreWindow(eventYmd, preStartYmd, shutdownYmd)) {
+          if (e.kind === "CNS") preCns += 1;
+          else preNrb += 1;
+        } else if (eventInPostWindow(eventYmd, shutdownYmd, postEndYmd)) {
+          if (e.kind === "CNS") postCns += 1;
+          else postNrb += 1;
+        }
+      }
+
+      const sortedEvents = [...list].sort(
+        (a, b) => a.eventDate.getTime() - b.eventDate.getTime()
+      );
+      truncated = sortedEvents.length > MAX_EVENTS_PER_SITE;
+      const slice = truncated
+        ? sortedEvents.slice(-MAX_EVENTS_PER_SITE)
+        : sortedEvents;
+      if (truncated) {
+        warnings.push(
+          `Fuze ${s.fuzeSiteId}: event list truncated to ${MAX_EVENTS_PER_SITE} (newest) for payload size.`
+        );
+      }
+
+      details = slice.map((e) => ({
+        id: e.externalId,
+        date: e.eventDate.toISOString(),
+        type: e.kind,
+      }));
     }
 
     const preTotal = preCns + preNrb;
     const postTotal = postCns + postNrb;
-
-    const sortedEvents = [...list].sort(
-      (a, b) => a.eventDate.getTime() - b.eventDate.getTime()
-    );
-    const truncated = sortedEvents.length > MAX_EVENTS_PER_SITE;
-    const slice = truncated
-      ? sortedEvents.slice(-MAX_EVENTS_PER_SITE)
-      : sortedEvents;
-    if (truncated) {
-      warnings.push(
-        `Fuze ${s.fuzeSiteId}: event list truncated to ${MAX_EVENTS_PER_SITE} (newest) for payload size.`
-      );
-    }
-
-    const details: SiteEventDetail[] = slice.map((e) => ({
-      id: e.externalId,
-      date: e.eventDate.toISOString(),
-      type: e.kind,
-    }));
 
     sites.push({
       fuzeSiteId: s.fuzeSiteId,
@@ -151,12 +219,21 @@ export function aggregateDecomWindows(p: AggregateParams): AggregatedAnalyzeResp
     });
   }
 
-  const relevantEvents = p.events.filter((e) => shutdownFuze.has(e.fuzeSiteId));
-  const sortedYmd = relevantEvents
-    .map((e) => ymdInTz(e.eventDate, tz))
-    .sort();
-  const pinDateMin = sortedYmd.length ? sortedYmd[0]! : null;
-  const pinDateMax = sortedYmd.length ? sortedYmd[sortedYmd.length - 1]! : null;
+  let pinDateMin: string | null = null;
+  let pinDateMax: string | null = null;
+  if (useRollup) {
+    const relevant = p.rollups!.filter((r) => shutdownFuze.has(r.fuzeSiteId));
+    const sortedYmd = relevant.map((r) => ymdInTz(r.rptDt, tz)).sort();
+    pinDateMin = sortedYmd.length ? sortedYmd[0]! : null;
+    pinDateMax = sortedYmd.length ? sortedYmd[sortedYmd.length - 1]! : null;
+  } else {
+    const relevantEvents = p.events.filter((e) => shutdownFuze.has(e.fuzeSiteId));
+    const sortedYmd = relevantEvents
+      .map((e) => ymdInTz(e.eventDate, tz))
+      .sort();
+    pinDateMin = sortedYmd.length ? sortedYmd[0]! : null;
+    pinDateMax = sortedYmd.length ? sortedYmd[sortedYmd.length - 1]! : null;
+  }
 
   const shutdownsWithNoEvents = sites.filter((x) => x.preTotal + x.postTotal === 0)
     .length;
@@ -169,6 +246,7 @@ export function aggregateDecomWindows(p: AggregateParams): AggregatedAnalyzeResp
     analysisRunIso: p.analysisRunDate.toISOString(),
     postWindowClampYmd: analysisClampYmd,
     maxEventsPerSite: MAX_EVENTS_PER_SITE,
+    cnsFeedKind,
   };
 
   return {

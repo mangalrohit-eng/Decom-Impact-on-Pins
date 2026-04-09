@@ -68,9 +68,23 @@ export async function POST(request: Request) {
       );
     }
 
+    const hasCns =
+      (parsedCns.feedKind === "rollup" && parsedCns.rollups.length > 0) ||
+      (parsedCns.feedKind === "events" && parsedCns.events.length > 0);
+    if (!hasCns) {
+      return NextResponse.json(
+        {
+          error: "No valid CNS / NRB rows after parsing.",
+          warnings: [...parsedDecom.warnings, ...parsedCns.warnings],
+        },
+        { status: 422 }
+      );
+    }
+
     const result = analyzeDecomImpact({
       shutdowns: parsedDecom.rows,
-      events: parsedCns.events,
+      events: parsedCns.feedKind === "rollup" ? [] : parsedCns.events,
+      rollups: parsedCns.feedKind === "rollup" ? parsedCns.rollups : undefined,
       timeZone,
       preDays,
       postDays,

@@ -7,13 +7,16 @@ import {
 import { buildAnalysisUserPrompt, LLM_ANALYSIS_SYSTEM } from "@/lib/decom/llm-prompts";
 import {
   mergeLlmIntoAggregate,
-  parseLlmAnalysisJson,
+  parseLlmJsonModeResponse,
 } from "@/lib/decom/merge-llm-analysis";
-import type { AnalyzeResponse, CnsEventRow, ShutdownRow } from "@/types/decom";
+import type {
+  AnalyzeResponse,
+  CnsEventRow,
+  CnsRollupRow,
+  ShutdownRow,
+} from "@/types/decom";
 
-export const maxDuration = 60;
-
-const RESULT_MARK = "###RESULT###";
+export const maxDuration = 120;
 
 type Body = {
   shutdowns: Array<{
@@ -21,12 +24,30 @@ type Body = {
     shutdownDate: string;
     naEngineerEmail?: string;
     naEngineerName?: string;
+    region?: string;
+    market?: string;
+    standAlone?: string;
+    allMmw?: string;
+    shutdownFlag?: string;
   }>;
   events: Array<{
     fuzeSiteId: string;
     eventDate: string;
     kind: "CNS" | "NRB";
     externalId?: string;
+  }>;
+  rollups?: Array<{
+    fuzeSiteId: string;
+    rptDt: string;
+    market?: string;
+    lteMarketId?: string;
+    lteMarketName?: string;
+    totalPinCount?: number;
+    nidPinCount?: number;
+    internalPinCount?: number;
+    totalNrbTickets?: number;
+    networkNrbCount?: number;
+    dataRelatedNrbCount?: number;
   }>;
   preDays?: number;
   postDays?: number;
@@ -37,6 +58,7 @@ type Body = {
 function parseBody(body: Body): {
   shutdowns: ShutdownRow[];
   events: CnsEventRow[];
+  rollups: CnsRollupRow[];
   preDays: number;
   postDays: number;
   timeZone: string;
@@ -47,6 +69,11 @@ function parseBody(body: Body): {
     shutdownDate: new Date(s.shutdownDate),
     naEngineerEmail: s.naEngineerEmail,
     naEngineerName: s.naEngineerName,
+    region: s.region,
+    market: s.market,
+    standAlone: s.standAlone,
+    allMmw: s.allMmw,
+    shutdownFlag: s.shutdownFlag,
   }));
 
   const events: CnsEventRow[] = (body.events ?? []).map((e) => ({
@@ -54,6 +81,20 @@ function parseBody(body: Body): {
     eventDate: new Date(e.eventDate),
     kind: e.kind === "NRB" ? "NRB" : "CNS",
     externalId: e.externalId,
+  }));
+
+  const rollups: CnsRollupRow[] = (body.rollups ?? []).map((r) => ({
+    fuzeSiteId: String(r.fuzeSiteId ?? "").trim(),
+    rptDt: new Date(r.rptDt),
+    market: r.market,
+    lteMarketId: r.lteMarketId,
+    lteMarketName: r.lteMarketName,
+    totalPinCount: Number(r.totalPinCount) || 0,
+    nidPinCount: Number(r.nidPinCount) || 0,
+    internalPinCount: Number(r.internalPinCount) || 0,
+    totalNrbTickets: Number(r.totalNrbTickets) || 0,
+    networkNrbCount: Number(r.networkNrbCount) || 0,
+    dataRelatedNrbCount: Number(r.dataRelatedNrbCount) || 0,
   }));
 
   const preDays = Math.max(1, Math.min(365, Number(body.preDays) || 30));
@@ -65,7 +106,22 @@ function parseBody(body: Body): {
   const analystNotes =
     typeof body.analystNotes === "string" ? body.analystNotes : "";
 
-  return { shutdowns, events, preDays, postDays, timeZone, analystNotes };
+  return { shutdowns, events, rollups, preDays, postDays, timeZone, analystNotes };
+}
+
+async function streamReasoningChunks(
+  send: (obj: unknown) => void,
+  reasoning: string,
+  chunkSize: number,
+  delayMs: number
+) {
+  for (let i = 0; i < reasoning.length; i += chunkSize) {
+    send({
+      type: "reasoning",
+      text: reasoning.slice(i, i + chunkSize),
+    });
+    if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs));
+  }
 }
 
 export async function POST(req: Request) {
@@ -76,7 +132,7 @@ export async function POST(req: Request) {
     return Response.json({ error: "Invalid JSON body." }, { status: 400 });
   }
 
-  const { shutdowns, events, preDays, postDays, timeZone, analystNotes } =
+  const { shutdowns, events, rollups, preDays, postDays, timeZone, analystNotes } =
     parseBody(body);
 
   if (shutdowns.length === 0) {
@@ -89,6 +145,7 @@ export async function POST(req: Request) {
   const agg = aggregateDecomWindows({
     shutdowns,
     events,
+    rollups,
     timeZone,
     preDays,
     postDays,
@@ -109,14 +166,7 @@ export async function POST(req: Request) {
         if (!process.env.OPENAI_API_KEY?.trim()) {
           const reasoning = buildDemoReasoningText(agg);
           const payload = buildDemoLlmPayload(agg);
-          const chunkSize = 4;
-          for (let i = 0; i < reasoning.length; i += chunkSize) {
-            send({
-              type: "reasoning",
-              text: reasoning.slice(i, i + chunkSize),
-            });
-            await new Promise((r) => setTimeout(r, 12));
-          }
+          await streamReasoningChunks(send, reasoning, 4, 12);
           const merged = mergeLlmIntoAggregate(base, payload, {
             analystNotes,
             llmModel: "heuristic-fallback",
@@ -131,6 +181,7 @@ export async function POST(req: Request) {
         }
 
         const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
         const completion = await openai.chat.completions.create({
           model,
           messages: [
@@ -140,74 +191,72 @@ export async function POST(req: Request) {
               content: buildAnalysisUserPrompt(agg, analystNotes),
             },
           ],
-          stream: true,
+          response_format: { type: "json_object" },
           temperature: 0.25,
+          max_tokens: 16384,
         });
 
-        let full = "";
-        let pastDelimiter = false;
+        const choice = completion.choices[0];
+        const finish = choice?.finish_reason;
+        const text = choice?.message?.content?.trim() ?? "";
 
-        for await (const part of completion) {
-          const d = part.choices[0]?.delta?.content ?? "";
-          if (!d) continue;
-          full += d;
-          if (!pastDelimiter) {
-            const i = full.indexOf(RESULT_MARK);
-            if (i < 0) {
-              send({ type: "reasoning", text: d });
-            } else {
-              pastDelimiter = true;
-              const chunkStart = full.length - d.length;
-              if (i > chunkStart) {
-                send({ type: "reasoning", text: full.slice(chunkStart, i) });
-              }
-            }
-          }
+        if (finish === "length") {
+          send({
+            type: "error",
+            message:
+              "Model response was truncated (output limit). Reduce the number of sites or try again.",
+          });
+          controller.close();
+          return;
         }
 
-        const jsonPart = full.split(RESULT_MARK)[1]?.trim() ?? "";
-        let payload: ReturnType<typeof parseLlmAnalysisJson> = parseLlmAnalysisJson(
-          jsonPart
-        );
+        const { payload, reasoning } = parseLlmJsonModeResponse(text);
+
         if (!payload) {
-          const alt = full.indexOf("{");
-          if (alt >= 0) {
-            payload = parseLlmAnalysisJson(full.slice(alt));
-          }
+          send({
+            type: "error",
+            message:
+              "Model returned JSON that could not be read as site decisions. Check API logs or retry with fewer sites.",
+          });
+          controller.close();
+          return;
         }
 
-        const reasoningOnly =
-          full.indexOf(RESULT_MARK) >= 0
-            ? full.slice(0, full.indexOf(RESULT_MARK)).trim()
-            : full.trim();
+        const narrative = reasoning || payload.overview || "";
+        await streamReasoningChunks(send, narrative, 6, 6);
 
         const merged = mergeLlmIntoAggregate(base, payload, {
           analystNotes,
           llmModel: model,
-          reasoning: reasoningOnly || undefined,
+          reasoning: narrative || undefined,
         });
 
-        const parseFailed = !payload;
+        const expectedIds = new Set(base.sites.map((s) => s.fuzeSiteId));
+        const returnedIds = new Set(payload.sites.map((s) => s.fuzeSiteId));
+        const missing = [...expectedIds].filter((id) => !returnedIds.has(id)).length;
+        const extraWarnings =
+          missing > 0
+            ? [
+                `LLM JSON omitted ${missing} Fuze site id(s) from "sites"; those sites were left unflagged.`,
+              ]
+            : [];
+
         send({
           type: "done",
           analysis: {
             ...merged,
             demoMode: false,
-            ...(parseFailed
-              ? {
-                  warnings: [
-                    ...merged.warnings,
-                    "Model output could not be parsed as JSON; all sites left unflagged. Try again or shorten data.",
-                  ],
-                }
-              : {}),
+            warnings: [...merged.warnings, ...extraWarnings],
           },
         });
         controller.close();
       } catch (e) {
+        const msg = e instanceof Error ? e.message : "Analysis failed.";
         send({
           type: "error",
-          message: e instanceof Error ? e.message : "Analysis failed.",
+          message: msg.includes("response_format")
+            ? `${msg} (Try gpt-4o-mini or another model that supports JSON mode.)`
+            : msg,
         });
         controller.close();
       }

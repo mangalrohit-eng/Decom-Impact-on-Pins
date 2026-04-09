@@ -37,7 +37,7 @@ import {
 import {
   CNS_FEED_SNAPSHOT,
   DECOM_FEED_SNAPSHOT,
-  getDefaultCnsEvents,
+  getDefaultCnsRollups,
   getDefaultShutdowns,
 } from "@/data/workflow-defaults";
 import { Badge } from "@/components/ui/badge";
@@ -83,6 +83,8 @@ import { cn } from "@/lib/utils";
 import type {
   AnalyzeResponse,
   CnsEventRow,
+  CnsFeedKind,
+  CnsRollupRow,
   ShutdownRow,
   SiteAnalysisRow,
 } from "@/types/decom";
@@ -104,7 +106,7 @@ const STEPS: StepDef[] = [
     n: 1,
     short: "Decom",
     title: "Decommissioned sites",
-    desc: "mmWave shutdown extract (same columns as the standard decom workbook).",
+    desc: "mmWave shutdown extract (region, market, Fuze, flags, calendar Date).",
     icon: Building2,
     aiDoes: "Uses shutdown dates as anchors for pre/post windows.",
     youDo: "Confirm the pull or replace the table with your own .xlsx.",
@@ -113,7 +115,7 @@ const STEPS: StepDef[] = [
     n: 2,
     short: "CNS",
     title: "CNS / NRB signals",
-    desc: "CNS / NRB pin extract (same columns as the standard signal workbook).",
+    desc: "Warehouse rollup (RPT_DT + pin/NRB counts) matching the EDW extract layout.",
     icon: RadioTower,
     aiDoes: "Will correlate these signals with each site’s timeline.",
     youDo: "Confirm the pull or load your own extract.",
@@ -199,6 +201,11 @@ function hydrateShutdowns(data: {
     shutdownDate: string;
     naEngineerEmail?: string;
     naEngineerName?: string;
+    region?: string;
+    market?: string;
+    standAlone?: string;
+    allMmw?: string;
+    shutdownFlag?: string;
   }>;
 }): ShutdownRow[] {
   return data.shutdowns.map((s) => ({
@@ -206,23 +213,56 @@ function hydrateShutdowns(data: {
     shutdownDate: new Date(s.shutdownDate),
     naEngineerEmail: s.naEngineerEmail,
     naEngineerName: s.naEngineerName,
+    region: s.region,
+    market: s.market,
+    standAlone: s.standAlone,
+    allMmw: s.allMmw,
+    shutdownFlag: s.shutdownFlag,
   }));
 }
 
-function hydrateEvents(data: {
+function hydrateCnsFeed(data: {
+  feedKind: CnsFeedKind;
   events: Array<{
     fuzeSiteId: string;
     eventDate: string;
     kind: "CNS" | "NRB";
     externalId?: string;
   }>;
-}): CnsEventRow[] {
-  return data.events.map((e) => ({
+  rollups: Array<{
+    fuzeSiteId: string;
+    rptDt: string;
+    market?: string;
+    lteMarketId?: string;
+    lteMarketName?: string;
+    totalPinCount: number;
+    nidPinCount: number;
+    internalPinCount: number;
+    totalNrbTickets: number;
+    networkNrbCount: number;
+    dataRelatedNrbCount: number;
+  }>;
+}): { feedKind: CnsFeedKind; events: CnsEventRow[]; rollups: CnsRollupRow[] } {
+  const events = data.events.map((e) => ({
     fuzeSiteId: e.fuzeSiteId,
     eventDate: new Date(e.eventDate),
     kind: e.kind,
     externalId: e.externalId,
   }));
+  const rollups = data.rollups.map((r) => ({
+    fuzeSiteId: r.fuzeSiteId,
+    rptDt: new Date(r.rptDt),
+    market: r.market,
+    lteMarketId: r.lteMarketId,
+    lteMarketName: r.lteMarketName,
+    totalPinCount: r.totalPinCount,
+    nidPinCount: r.nidPinCount,
+    internalPinCount: r.internalPinCount,
+    totalNrbTickets: r.totalNrbTickets,
+    networkNrbCount: r.networkNrbCount,
+    dataRelatedNrbCount: r.dataRelatedNrbCount,
+  }));
+  return { feedKind: data.feedKind, events, rollups };
 }
 
 function serializeShutdowns(list: ShutdownRow[]) {
@@ -231,6 +271,11 @@ function serializeShutdowns(list: ShutdownRow[]) {
     shutdownDate: s.shutdownDate.toISOString(),
     naEngineerEmail: s.naEngineerEmail,
     naEngineerName: s.naEngineerName,
+    region: s.region,
+    market: s.market,
+    standAlone: s.standAlone,
+    allMmw: s.allMmw,
+    shutdownFlag: s.shutdownFlag,
   }));
 }
 
@@ -240,6 +285,22 @@ function serializeEvents(list: CnsEventRow[]) {
     eventDate: e.eventDate.toISOString(),
     kind: e.kind,
     externalId: e.externalId,
+  }));
+}
+
+function serializeRollups(list: CnsRollupRow[]) {
+  return list.map((r) => ({
+    fuzeSiteId: r.fuzeSiteId,
+    rptDt: r.rptDt.toISOString(),
+    market: r.market,
+    lteMarketId: r.lteMarketId,
+    lteMarketName: r.lteMarketName,
+    totalPinCount: r.totalPinCount,
+    nidPinCount: r.nidPinCount,
+    internalPinCount: r.internalPinCount,
+    totalNrbTickets: r.totalNrbTickets,
+    networkNrbCount: r.networkNrbCount,
+    dataRelatedNrbCount: r.dataRelatedNrbCount,
   }));
 }
 
@@ -293,7 +354,9 @@ export function DecomDashboard() {
   const [step, setStep] = useState(1);
 
   const [shutdowns, setShutdowns] = useState<ShutdownRow[]>(() => getDefaultShutdowns());
-  const [events, setEvents] = useState<CnsEventRow[]>(() => getDefaultCnsEvents());
+  const [cnsFeedKind, setCnsFeedKind] = useState<CnsFeedKind>("rollup");
+  const [rollups, setRollups] = useState<CnsRollupRow[]>(() => getDefaultCnsRollups());
+  const [events, setEvents] = useState<CnsEventRow[]>([]);
   const [decomFileName, setDecomFileName] = useState<string | null>(null);
   const [cnsFileName, setCnsFileName] = useState<string | null>(null);
   const [uploadingDecom, setUploadingDecom] = useState(false);
@@ -331,6 +394,8 @@ export function DecomDashboard() {
   const [newCnsDate, setNewCnsDate] = useState("");
   const [newCnsKind, setNewCnsKind] = useState<"CNS" | "NRB">("CNS");
   const [newCnsExtId, setNewCnsExtId] = useState("");
+  const [newRollupPins, setNewRollupPins] = useState("0");
+  const [newRollupNrb, setNewRollupNrb] = useState("0");
 
   const invalidateAnalysis = useCallback(() => {
     setAnalysis(null);
@@ -386,12 +451,49 @@ export function DecomDashboard() {
       const fd = new FormData();
       fd.append("file", file);
       const res = await fetch("/api/decom/parse-cns", { method: "POST", body: fd });
-      const data = await res.json();
+      const data = (await res.json()) as {
+        feedKind?: CnsFeedKind;
+        events?: Array<{
+          fuzeSiteId: string;
+          eventDate: string;
+          kind: "CNS" | "NRB";
+          externalId?: string;
+        }>;
+        rollups?: Array<{
+          fuzeSiteId: string;
+          rptDt: string;
+          market?: string;
+          lteMarketId?: string;
+          lteMarketName?: string;
+          totalPinCount: number;
+          nidPinCount: number;
+          internalPinCount: number;
+          totalNrbTickets: number;
+          networkNrbCount: number;
+          dataRelatedNrbCount: number;
+        }>;
+        error?: string;
+      };
       if (!res.ok) {
         setError(data.error ?? "CNS upload failed.");
         return;
       }
-      setEvents(hydrateEvents(data));
+      const feedKind: CnsFeedKind =
+        data.feedKind === "events"
+          ? "events"
+          : data.feedKind === "rollup"
+            ? "rollup"
+            : (data.rollups?.length ?? 0) > 0
+              ? "rollup"
+              : "events";
+      const parsed = hydrateCnsFeed({
+        feedKind,
+        events: data.events ?? [],
+        rollups: data.rollups ?? [],
+      });
+      setCnsFeedKind(parsed.feedKind);
+      setEvents(parsed.events);
+      setRollups(parsed.rollups);
       setCnsFileName(file.name);
       invalidateAnalysis();
     } catch {
@@ -417,7 +519,8 @@ export function DecomDashboard() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           shutdowns: serializeShutdowns(shutdowns),
-          events: serializeEvents(events),
+          events: cnsFeedKind === "events" ? serializeEvents(events) : [],
+          rollups: cnsFeedKind === "rollup" ? serializeRollups(rollups) : [],
           preDays: pre,
           postDays: post,
           timeZone,
@@ -585,7 +688,9 @@ export function DecomDashboard() {
     step === 1
       ? shutdowns.length > 0
       : step === 2
-        ? events.length > 0
+        ? cnsFeedKind === "rollup"
+          ? rollups.length > 0
+          : events.length > 0
         : step === 3
           ? analysis != null
           : step === 4
@@ -615,20 +720,40 @@ export function DecomDashboard() {
   const addCnsRow = () => {
     const fuze = newCnsFuze.trim();
     if (!fuze || !newCnsDate) return;
-    setEvents((prev) => [
-      ...prev,
-      {
-        fuzeSiteId: fuze,
-        eventDate: new Date(`${newCnsDate}T12:00:00.000Z`),
-        kind: newCnsKind,
-        externalId: newCnsExtId.trim() || undefined,
-      },
-    ]);
+    if (cnsFeedKind === "rollup") {
+      const pins = Math.max(0, Math.floor(Number(newRollupPins) || 0));
+      const nrb = Math.max(0, Math.floor(Number(newRollupNrb) || 0));
+      setRollups((prev) => [
+        ...prev,
+        {
+          fuzeSiteId: fuze,
+          rptDt: new Date(`${newCnsDate}T12:00:00.000Z`),
+          totalPinCount: pins,
+          nidPinCount: 0,
+          internalPinCount: 0,
+          totalNrbTickets: nrb,
+          networkNrbCount: 0,
+          dataRelatedNrbCount: 0,
+        },
+      ]);
+    } else {
+      setEvents((prev) => [
+        ...prev,
+        {
+          fuzeSiteId: fuze,
+          eventDate: new Date(`${newCnsDate}T12:00:00.000Z`),
+          kind: newCnsKind,
+          externalId: newCnsExtId.trim() || undefined,
+        },
+      ]);
+    }
     setCnsDialogOpen(false);
     setNewCnsFuze("");
     setNewCnsDate("");
     setNewCnsKind("CNS");
     setNewCnsExtId("");
+    setNewRollupPins("0");
+    setNewRollupNrb("0");
     invalidateAnalysis();
   };
 
@@ -823,10 +948,9 @@ export function DecomDashboard() {
                   {decomFileName ? (
                     <span className="font-medium text-foreground">
                       Working set replaced by{" "}
-                      <span className="font-mono text-xs">{decomFileName}</span>. Column layout
-                      matches the standard decom workbook (Fuze Site ID, Shutdown Date, NA Engineer
-                      Email, NA Engineer Name). You can still download the sample .xlsx to share the
-                      format or compare structure.
+                      <span className="font-mono text-xs">{decomFileName}</span>. Columns match the
+                      mmWave shutdown extract (region, market, Fuze Site ID, StandAlon, ALL MMw,
+                      Shutdown, Date).
                     </span>
                   ) : (
                     <>
@@ -840,9 +964,11 @@ export function DecomDashboard() {
                         ET.
                       </span>
                       <span className="block text-xs text-muted-foreground">
-                        Rows below use the same fields as the decom .xlsx template. Upload a
-                        workbook to replace this sync; add row appends to the current set. Download
-                        sample format for the exact column layout and the same rows as this feed.
+                        Same rows and layout as{" "}
+                        <span className="font-mono text-[11px]">
+                          Dummy data - Date of mmWave Shutdowns by Site.xlsx
+                        </span>
+                        . Upload to replace; download sample for that file.
                       </span>
                     </>
                   )}
@@ -940,7 +1066,7 @@ export function DecomDashboard() {
                   }}
                 >
                   <RotateCcw className="h-4 w-4" aria-hidden />
-                  Restore sync pull
+                  Restore default feed
                 </Button>
               </div>
             </div>
@@ -956,24 +1082,26 @@ export function DecomDashboard() {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead>Region</TableHead>
+                    <TableHead>Market</TableHead>
                     <TableHead>Fuze Site ID</TableHead>
-                    <TableHead>Shutdown Date</TableHead>
-                    <TableHead>NA Engineer Email</TableHead>
-                    <TableHead>NA Engineer Name</TableHead>
+                    <TableHead>StandAlon</TableHead>
+                    <TableHead>ALL MMw</TableHead>
+                    <TableHead>Shutdown</TableHead>
+                    <TableHead>Date</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {shutdowns.map((r) => (
                     <TableRow key={r.fuzeSiteId}>
+                      <TableCell className="text-xs">{r.region ?? "—"}</TableCell>
+                      <TableCell className="text-xs">{r.market ?? "—"}</TableCell>
                       <TableCell className="font-mono text-xs">{r.fuzeSiteId}</TableCell>
+                      <TableCell className="text-xs">{r.standAlone ?? "—"}</TableCell>
+                      <TableCell className="text-xs">{r.allMmw ?? "—"}</TableCell>
+                      <TableCell className="text-xs">{r.shutdownFlag ?? "—"}</TableCell>
                       <TableCell className="text-xs">
                         {r.shutdownDate.toISOString().slice(0, 10)}
-                      </TableCell>
-                      <TableCell className="max-w-[200px] truncate font-mono text-xs">
-                        {r.naEngineerEmail ?? "—"}
-                      </TableCell>
-                      <TableCell className="max-w-[160px] truncate text-xs">
-                        {r.naEngineerName ?? "—"}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -1002,16 +1130,26 @@ export function DecomDashboard() {
                     {cnsFileName ? "Uploaded workbook" : "Warehouse sync"}
                   </Badge>
                   <Badge variant="outline" className="font-mono text-xs font-normal">
-                    {events.length} rows
+                    {cnsFeedKind === "rollup" ? rollups.length : events.length} rows
                   </Badge>
+                  {cnsFeedKind === "rollup" ? (
+                    <Badge variant="outline" className="text-[10px] font-normal">
+                      Warehouse rollup
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="text-[10px] font-normal">
+                      Per-pin extract
+                    </Badge>
+                  )}
                 </div>
                 <CardDescription className="space-y-1.5 text-sm leading-relaxed">
                   {cnsFileName ? (
                     <span className="font-medium text-foreground">
                       Working set replaced by{" "}
-                      <span className="font-mono text-xs">{cnsFileName}</span>. Column layout
-                      matches the standard CNS workbook (Fuze Site ID, Pin Date, Type, Pin ID). You
-                      can still download the sample .xlsx for the format and default feed rows.
+                      <span className="font-mono text-xs">{cnsFileName}</span>.
+                      {cnsFeedKind === "rollup"
+                        ? " Layout: FUZE_SITE_ID, MARKET, LTE market, RPT_DT, pin/NRB count columns."
+                        : " Layout: per-pin rows (Fuze, event date, type, id)."}
                     </span>
                   ) : (
                     <>
@@ -1025,9 +1163,12 @@ export function DecomDashboard() {
                         ET.
                       </span>
                       <span className="block text-xs text-muted-foreground">
-                        Rows mirror the CNS / NRB .xlsx extract. Upload your file to replace this
-                        pull; add row appends to the current set. Download sample format for columns
-                        and the same rows as this warehouse pull.
+                        Same rows as{" "}
+                        <span className="font-mono text-[11px]">
+                          Dummy data - CNS Pins and NRB Tix Near Decom Sites.xlsx
+                        </span>
+                        . Analysis sums TOTAL_PIN_COUNT and TOTAL_NRB_TICKETS into pre/post windows
+                        by RPT_DT. Upload a per-pin extract to switch to row-counting mode.
                       </span>
                     </>
                   )}
@@ -1043,7 +1184,11 @@ export function DecomDashboard() {
                   </DialogTrigger>
                   <DialogContent>
                     <DialogHeader>
-                      <DialogTitle>Add CNS / NRB row</DialogTitle>
+                      <DialogTitle>
+                        {cnsFeedKind === "rollup"
+                          ? "Add warehouse rollup row"
+                          : "Add CNS / NRB row"}
+                      </DialogTitle>
                     </DialogHeader>
                     <div className="grid gap-3 py-2">
                       <div className="space-y-2">
@@ -1052,12 +1197,14 @@ export function DecomDashboard() {
                           id="nc-fuze"
                           value={newCnsFuze}
                           onChange={(e) => setNewCnsFuze(e.target.value)}
-                          placeholder="FZ-204881"
+                          placeholder="6165055013"
                           className="font-mono"
                         />
                       </div>
                       <div className="space-y-2">
-                        <Label htmlFor="nc-date">Pin date</Label>
+                        <Label htmlFor="nc-date">
+                          {cnsFeedKind === "rollup" ? "RPT_DT" : "Pin date"}
+                        </Label>
                         <Input
                           id="nc-date"
                           type="date"
@@ -1065,29 +1212,54 @@ export function DecomDashboard() {
                           onChange={(e) => setNewCnsDate(e.target.value)}
                         />
                       </div>
-                      <div className="space-y-2">
-                        <Label>Type</Label>
-                        <Select
-                          value={newCnsKind}
-                          onValueChange={(v) => setNewCnsKind(v as "CNS" | "NRB")}
-                        >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="CNS">CNS</SelectItem>
-                            <SelectItem value="NRB">NRB</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="nc-ext">Pin ID (optional)</Label>
-                        <Input
-                          id="nc-ext"
-                          value={newCnsExtId}
-                          onChange={(e) => setNewCnsExtId(e.target.value)}
-                        />
-                      </div>
+                      {cnsFeedKind === "rollup" ? (
+                        <>
+                          <div className="space-y-2">
+                            <Label htmlFor="nc-pins">TOTAL_PIN_COUNT</Label>
+                            <Input
+                              id="nc-pins"
+                              inputMode="numeric"
+                              value={newRollupPins}
+                              onChange={(e) => setNewRollupPins(e.target.value)}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="nc-nrb">TOTAL_NRB_TICKETS</Label>
+                            <Input
+                              id="nc-nrb"
+                              inputMode="numeric"
+                              value={newRollupNrb}
+                              onChange={(e) => setNewRollupNrb(e.target.value)}
+                            />
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="space-y-2">
+                            <Label>Type</Label>
+                            <Select
+                              value={newCnsKind}
+                              onValueChange={(v) => setNewCnsKind(v as "CNS" | "NRB")}
+                            >
+                              <SelectTrigger>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="CNS">CNS</SelectItem>
+                                <SelectItem value="NRB">NRB</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="nc-ext">Pin ID (optional)</Label>
+                            <Input
+                              id="nc-ext"
+                              value={newCnsExtId}
+                              onChange={(e) => setNewCnsExtId(e.target.value)}
+                            />
+                          </div>
+                        </>
+                      )}
                     </div>
                     <DialogFooter>
                       <Button type="button" variant="outline" onClick={() => setCnsDialogOpen(false)}>
@@ -1125,13 +1297,15 @@ export function DecomDashboard() {
                   variant="outline"
                   size="sm"
                   onClick={() => {
-                    setEvents(getDefaultCnsEvents());
+                    setCnsFeedKind("rollup");
+                    setRollups(getDefaultCnsRollups());
+                    setEvents([]);
                     setCnsFileName(null);
                     invalidateAnalysis();
                   }}
                 >
                   <RotateCcw className="h-4 w-4" aria-hidden />
-                  Restore sync pull
+                  Restore default feed
                 </Button>
               </div>
             </div>
@@ -1144,31 +1318,87 @@ export function DecomDashboard() {
               </p>
             ) : null}
             <ScrollArea className="h-[min(420px,55vh)] w-full rounded-md border border-border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Fuze Site ID</TableHead>
-                    <TableHead>Pin Date</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Pin ID</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {events.map((r, idx) => (
-                    <TableRow key={`${r.fuzeSiteId}-${idx}-${r.externalId ?? ""}`}>
-                      <TableCell className="font-mono text-xs">{r.fuzeSiteId}</TableCell>
-                      <TableCell className="text-xs">
-                        {r.eventDate.toISOString().slice(0, 10)}
-                      </TableCell>
-                      <TableCell className="text-xs">{r.kind}</TableCell>
-                      <TableCell className="text-xs">{r.externalId ?? "—"}</TableCell>
+              {cnsFeedKind === "rollup" ? (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>FUZE_SITE_ID</TableHead>
+                      <TableHead>MARKET</TableHead>
+                      <TableHead>LTE_MARKET_ID</TableHead>
+                      <TableHead>LTE_MARKET_NAME</TableHead>
+                      <TableHead>RPT_DT</TableHead>
+                      <TableHead className="text-right">TOTAL_PIN</TableHead>
+                      <TableHead className="text-right">NID_PIN</TableHead>
+                      <TableHead className="text-right">INTERNAL_PIN</TableHead>
+                      <TableHead className="text-right">TOTAL_NRB</TableHead>
+                      <TableHead className="text-right">NET_NRB</TableHead>
+                      <TableHead className="text-right">DATA_NRB</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {rollups.map((r, idx) => (
+                      <TableRow key={`${r.fuzeSiteId}-${idx}-${r.rptDt.toISOString()}`}>
+                        <TableCell className="font-mono text-xs">{r.fuzeSiteId}</TableCell>
+                        <TableCell className="max-w-[100px] truncate text-xs">
+                          {r.market ?? "—"}
+                        </TableCell>
+                        <TableCell className="text-xs">{r.lteMarketId ?? "—"}</TableCell>
+                        <TableCell className="max-w-[120px] truncate text-xs">
+                          {r.lteMarketName ?? "—"}
+                        </TableCell>
+                        <TableCell className="text-xs">
+                          {r.rptDt.toISOString().slice(0, 10)}
+                        </TableCell>
+                        <TableCell className="text-right text-xs tabular-nums">
+                          {r.totalPinCount}
+                        </TableCell>
+                        <TableCell className="text-right text-xs tabular-nums">
+                          {r.nidPinCount}
+                        </TableCell>
+                        <TableCell className="text-right text-xs tabular-nums">
+                          {r.internalPinCount}
+                        </TableCell>
+                        <TableCell className="text-right text-xs tabular-nums">
+                          {r.totalNrbTickets}
+                        </TableCell>
+                        <TableCell className="text-right text-xs tabular-nums">
+                          {r.networkNrbCount}
+                        </TableCell>
+                        <TableCell className="text-right text-xs tabular-nums">
+                          {r.dataRelatedNrbCount}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Fuze Site ID</TableHead>
+                      <TableHead>Pin Date</TableHead>
+                      <TableHead>Type</TableHead>
+                      <TableHead>Pin ID</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {events.map((r, idx) => (
+                      <TableRow key={`${r.fuzeSiteId}-${idx}-${r.externalId ?? ""}`}>
+                        <TableCell className="font-mono text-xs">{r.fuzeSiteId}</TableCell>
+                        <TableCell className="text-xs">
+                          {r.eventDate.toISOString().slice(0, 10)}
+                        </TableCell>
+                        <TableCell className="text-xs">{r.kind}</TableCell>
+                        <TableCell className="text-xs">{r.externalId ?? "—"}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
             </ScrollArea>
             <p className="text-xs text-muted-foreground">
-              Showing all {events.length} row(s) in the working set.
+              Showing all{" "}
+              {cnsFeedKind === "rollup" ? rollups.length : events.length} row(s) in the working set.
             </p>
           </CardContent>
         </Card>
@@ -1191,8 +1421,8 @@ export function DecomDashboard() {
                 Windows &amp; analyst context
               </CardTitle>
               <CardDescription>
-                Pre/post windows define how pin counts are bucketed for the model. They are not
-                threshold rules — the LLM judges impact.
+                Pre/post windows bucket either warehouse rollup counts (by RPT_DT) or per-pin rows
+                (by event date). They are not threshold rules — the model judges impact.
               </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -1430,12 +1660,12 @@ export function DecomDashboard() {
                               <Dialog>
                                 <DialogTrigger asChild>
                                   <Button variant="ghost" size="sm" className="h-8 px-2 text-xs">
-                                    {row.events.length} pin(s)
+                                    {row.events.length} row(s)
                                   </Button>
                                 </DialogTrigger>
                                 <DialogContent className="max-h-[85vh] max-w-lg">
                                   <DialogHeader>
-                                    <DialogTitle>Pins — {row.fuzeSiteId}</DialogTitle>
+                                    <DialogTitle>Activity — {row.fuzeSiteId}</DialogTitle>
                                   </DialogHeader>
                                   <ScrollArea className="max-h-[55vh] pr-3">
                                     <Table>
@@ -1443,7 +1673,7 @@ export function DecomDashboard() {
                                         <TableRow>
                                           <TableHead>Type</TableHead>
                                           <TableHead>When (UTC)</TableHead>
-                                          <TableHead>Id</TableHead>
+                                          <TableHead>Detail</TableHead>
                                         </TableRow>
                                       </TableHeader>
                                       <TableBody>
@@ -1453,8 +1683,8 @@ export function DecomDashboard() {
                                             <TableCell className="font-mono text-xs">
                                               {ev.date}
                                             </TableCell>
-                                            <TableCell className="text-xs">
-                                              {ev.id ?? "—"}
+                                            <TableCell className="max-w-[280px] text-xs text-muted-foreground">
+                                              {ev.note ?? ev.id ?? "—"}
                                             </TableCell>
                                           </TableRow>
                                         ))}
