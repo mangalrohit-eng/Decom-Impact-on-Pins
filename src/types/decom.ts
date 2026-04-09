@@ -100,7 +100,9 @@ export type AnalyzeResponse = {
   sites: SiteAnalysisRow[];
   warnings: string[];
   appliedConfig: AppliedConfig;
-  /** Full streamed reasoning text (LLM path) */
+  /** Streamed analysis plan before structured JSON (LLM path) */
+  llmPlanning?: string;
+  /** Detailed findings narrative after the plan (LLM path) */
   llmReasoning?: string;
   /** Short headline from the model (LLM path) */
   llmOverview?: string;

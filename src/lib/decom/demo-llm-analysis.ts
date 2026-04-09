@@ -45,24 +45,37 @@ export function buildDemoLlmPayload(
   return { overview, sites };
 }
 
+export function buildDemoPlanningText(agg: AggregatedAnalyzeResponse): string {
+  const lines = [
+    "Plan (correlation path — model service unavailable for this session):",
+    "",
+    "1. Compare pre- vs post-shutdown totals (CNS + NRB) for each Fuze site using the configured calendar windows.",
+    "2. Treat warehouse rollup feeds as summed TOTAL_PIN_COUNT / TOTAL_NRB_TICKETS by RPT_DT; per-pin feeds as row counts.",
+    "3. Apply conservative spike heuristics when post-shutdown volume materially exceeds baseline.",
+    "4. Flag sites only where the pattern suggests NA review for exceptions or reinstatement; otherwise document flat or modest change.",
+    "5. Summarize unmatched pin rows separately; they do not drive per-site flags.",
+    "",
+    "Next: structured findings.",
+  ];
+  return lines.join("\n");
+}
+
+/** Findings-only narrative (after plan); pairs with buildDemoPlanningText. */
 export function buildDemoReasoningText(agg: AggregatedAnalyzeResponse): string {
   const lines = [
-    "Analysis engine: correlation path (LLM service not available for this session).",
+    `Working set: ${agg.summary.decomSiteCount} decommissioned sites; ${agg.summary.sitesWithEvents} with CNS/NRB activity in the extract.`,
+    `Unmatched pin rows (no Fuze match in decom file): ${agg.summary.unmatchedEventCount}.`,
     "",
-    `Reviewing ${agg.summary.decomSiteCount} decommissioned sites with ${agg.summary.sitesWithEvents} sites carrying CNS/NRB activity.`,
-    `Unmatched pin rows (no matching Fuze in decom file): ${agg.summary.unmatchedEventCount}.`,
+    "Per site I compared pre-window vs post-window totals. Elevated post-shutdown customer signals relative to baseline are surfaced in the table below as flagged sites.",
     "",
-    "Per site, I compared pre-window vs post-window totals (CNS + NRB) using the calendar windows you set.",
-    "Sites where post-shutdown volume clearly steps up relative to baseline are candidates for reinstatement discussion.",
-    "",
-    "Key observations:",
+    "Site-level signal summary:",
     ...agg.sites.slice(0, 12).map(
       (s) =>
         `- ${s.fuzeSiteId}: shutdown ${s.shutdownDate} — pre ${s.preTotal} / post ${s.postTotal} (CNS ${s.preCns}→${s.postCns}, NRB ${s.preNrb}→${s.postNrb})`
     ),
     agg.sites.length > 12 ? `…and ${agg.sites.length - 12} more sites.` : "",
     "",
-    "See structured result below for flagged recommendations.",
+    "Structured flags and rationales follow in the site list.",
   ];
   return lines.filter(Boolean).join("\n");
 }

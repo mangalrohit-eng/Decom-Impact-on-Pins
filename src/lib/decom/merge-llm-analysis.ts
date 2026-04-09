@@ -194,7 +194,12 @@ export function parseLlmAnalysisFromCompletion(
 export function mergeLlmIntoAggregate(
   base: AnalyzeResponse,
   payload: LlmAnalysisPayload | null,
-  opts: { analystNotes?: string; llmModel?: string; reasoning?: string }
+  opts: {
+    analystNotes?: string;
+    llmModel?: string;
+    planning?: string;
+    reasoning?: string;
+  }
 ): AnalyzeResponse {
   const byId = new Map<string, LlmSiteDecision>();
   if (payload) {
@@ -236,6 +241,7 @@ export function mergeLlmIntoAggregate(
       llmModel: opts.llmModel,
     },
     llmOverview: payload?.overview,
+    llmPlanning: opts.planning?.trim() || undefined,
     llmReasoning: opts.reasoning,
   };
 }

@@ -94,12 +94,14 @@ async function main() {
   const events = parseSse(text);
   const done = events.find((e) => e.type === "done");
   const err = events.find((e) => e.type === "error");
+  const planningChunks = events.filter((e) => e.type === "planning").length;
   const reasoningChunks = events.filter((e) => e.type === "reasoning").length;
 
   const report = {
     base,
     httpStatus: res.status,
     sseDataLines: events.length,
+    planningChunks,
     reasoningChunks,
     error: err ?? null,
     demoMode: done?.analysis?.demoMode,
@@ -107,6 +109,7 @@ async function main() {
     siteCount: done?.analysis?.sites?.length,
     flaggedCount: done?.analysis?.summary?.flaggedCount,
     hasLlmOverview: Boolean(done?.analysis?.llmOverview),
+    hasLlmPlanning: Boolean(done?.analysis?.llmPlanning),
     hasLlmReasoning: Boolean(done?.analysis?.llmReasoning),
   };
 
@@ -124,6 +127,9 @@ async function main() {
     failures.push("Missing llmModel on analysis");
   if (done?.analysis?.sites?.length !== 1)
     failures.push(`Expected 1 site, got ${done?.analysis?.sites?.length}`);
+  if (planningChunks < 1) failures.push("Expected streamed planning chunks from API");
+  if (!done?.analysis?.llmPlanning?.trim())
+    failures.push("Expected analysis.llmPlanning on done payload");
 
   if (failures.length) {
     console.error("FAILED:", failures.join("; "));

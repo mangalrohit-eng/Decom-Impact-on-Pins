@@ -2,9 +2,15 @@ import OpenAI from "openai";
 import { aggregateDecomWindows } from "@/lib/decom/aggregate-windows";
 import {
   buildDemoLlmPayload,
+  buildDemoPlanningText,
   buildDemoReasoningText,
 } from "@/lib/decom/demo-llm-analysis";
-import { buildAnalysisUserPrompt, LLM_ANALYSIS_SYSTEM } from "@/lib/decom/llm-prompts";
+import {
+  buildFinalJsonUserPrompt,
+  buildPlanningUserPrompt,
+  LLM_ANALYSIS_SYSTEM,
+  LLM_PLANNING_SYSTEM,
+} from "@/lib/decom/llm-prompts";
 import {
   mergeLlmIntoAggregate,
   parseLlmJsonModeResponse,
@@ -109,16 +115,23 @@ function parseBody(body: Body): {
   return { shutdowns, events, rollups, preDays, postDays, timeZone, analystNotes };
 }
 
-async function streamReasoningChunks(
+const FALLBACK_PLAN = `1. Review each Fuze site's pre- vs post-shutdown CNS and NRB totals in the configured windows.
+2. Respect rollup vs per-pin feed semantics from the payload.
+3. Treat sparse or zero pre-window baselines cautiously before inferring spikes.
+4. Flag only where post-shutdown customer signals suggest meaningful change worth NA review.
+Next: structured findings.`;
+
+async function streamSseTextChunks(
   send: (obj: unknown) => void,
-  reasoning: string,
+  kind: "planning" | "reasoning",
+  text: string,
   chunkSize: number,
   delayMs: number
 ) {
-  for (let i = 0; i < reasoning.length; i += chunkSize) {
+  for (let i = 0; i < text.length; i += chunkSize) {
     send({
-      type: "reasoning",
-      text: reasoning.slice(i, i + chunkSize),
+      type: kind,
+      text: text.slice(i, i + chunkSize),
     });
     if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs));
   }
@@ -166,15 +179,25 @@ export async function POST(req: Request) {
         send({ type: "activity", phase: "thinking" });
 
         if (!process.env.OPENAI_API_KEY?.trim()) {
-          const reasoning = buildDemoReasoningText(agg);
+          const planningText = buildDemoPlanningText(agg);
+          const findingsText = buildDemoReasoningText(agg);
           const payload = buildDemoLlmPayload(agg);
+
+          send({ type: "activity", phase: "planning" });
+          await streamSseTextChunks(send, "planning", planningText, 6, 10);
+
+          send({ type: "activity", phase: "analyzing" });
+          await new Promise((r) => setTimeout(r, 400));
+
           send({ type: "activity", phase: "reasoning" });
-          await streamReasoningChunks(send, reasoning, 4, 12);
+          await streamSseTextChunks(send, "reasoning", findingsText, 4, 12);
+
           send({ type: "activity", phase: "sites" });
           const merged = mergeLlmIntoAggregate(base, payload, {
             analystNotes,
             llmModel: "heuristic-fallback",
-            reasoning,
+            planning: planningText,
+            reasoning: findingsText,
           });
           send({
             type: "done",
@@ -186,13 +209,45 @@ export async function POST(req: Request) {
 
         const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+        send({ type: "activity", phase: "planning" });
+        const planStream = await openai.chat.completions.create({
+          model,
+          messages: [
+            { role: "system", content: LLM_PLANNING_SYSTEM },
+            {
+              role: "user",
+              content: buildPlanningUserPrompt(agg, analystNotes),
+            },
+          ],
+          stream: true,
+          temperature: 0.35,
+          max_tokens: 1024,
+        });
+
+        let planningBuf = "";
+        for await (const chunk of planStream) {
+          const t = chunk.choices[0]?.delta?.content ?? "";
+          if (t) {
+            planningBuf += t;
+            send({ type: "planning", text: t });
+          }
+        }
+
+        planningBuf = planningBuf.trim();
+        if (!planningBuf) {
+          planningBuf = FALLBACK_PLAN;
+          await streamSseTextChunks(send, "planning", planningBuf, 32, 4);
+        }
+
+        send({ type: "activity", phase: "analyzing" });
+
         const completion = await openai.chat.completions.create({
           model,
           messages: [
             { role: "system", content: LLM_ANALYSIS_SYSTEM },
             {
               role: "user",
-              content: buildAnalysisUserPrompt(agg, analystNotes),
+              content: buildFinalJsonUserPrompt(agg, analystNotes, planningBuf),
             },
           ],
           response_format: { type: "json_object" },
@@ -226,15 +281,17 @@ export async function POST(req: Request) {
           return;
         }
 
-        const narrative = reasoning || payload.overview || "";
+        const findingsNarrative = reasoning || payload.overview || "";
         send({ type: "activity", phase: "reasoning" });
-        await streamReasoningChunks(send, narrative, 6, 6);
+        await streamSseTextChunks(send, "reasoning", findingsNarrative, 5, 5);
+
         send({ type: "activity", phase: "sites" });
 
         const merged = mergeLlmIntoAggregate(base, payload, {
           analystNotes,
           llmModel: model,
-          reasoning: narrative || undefined,
+          planning: planningBuf,
+          reasoning: findingsNarrative || undefined,
         });
 
         const expectedIds = new Set(base.sites.map((s) => s.fuzeSiteId));

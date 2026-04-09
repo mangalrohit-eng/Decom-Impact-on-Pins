@@ -81,6 +81,7 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
+import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import type {
   AnalyzeResponse,
@@ -126,7 +127,7 @@ const STEPS: StepDef[] = [
     n: 3,
     short: "Analyze",
     title: "AI analysis",
-    desc: "The model streams reasoning, then flags sites with elevated post-decom customer signals.",
+    desc: "The model streams a plan, then findings, then flags sites with elevated post-decom customer signals.",
     icon: Sparkles,
     aiDoes: "Reasoning + structured flagging + concern levels.",
     youDo: "Set windows, timezone, and optional analyst notes.",
@@ -372,8 +373,9 @@ export function DecomDashboard() {
   const [analysis, setAnalysis] = useState<AnalyzeResponse | null>(null);
   const [analysisRunning, setAnalysisRunning] = useState(false);
   const [reasoningLog, setReasoningLog] = useState("");
+  const [planningLog, setPlanningLog] = useState("");
   const [analysisActivityPhase, setAnalysisActivityPhase] = useState<
-    null | "thinking" | "reasoning" | "sites"
+    null | "thinking" | "planning" | "analyzing" | "reasoning" | "sites"
   >(null);
 
   const [selectedReinstate, setSelectedReinstate] = useState<Set<string>>(new Set());
@@ -406,6 +408,7 @@ export function DecomDashboard() {
     setAnalysis(null);
     setResolveRecipients(null);
     setReasoningLog("");
+    setPlanningLog("");
     setEmailsDemo(false);
     setSentByTo({});
     setSendSuccessBanner(null);
@@ -514,6 +517,7 @@ export function DecomDashboard() {
     setError(null);
     setResolveRecipients(null);
     setReasoningLog("");
+    setPlanningLog("");
     setEmailsDemo(false);
     setSentByTo({});
     setSendSuccessBanner(null);
@@ -569,9 +573,19 @@ export function DecomDashboard() {
           }
           if (data.type === "activity") {
             const p = data.phase;
-            if (p === "thinking" || p === "reasoning" || p === "sites") {
+            if (
+              p === "thinking" ||
+              p === "planning" ||
+              p === "analyzing" ||
+              p === "reasoning" ||
+              p === "sites"
+            ) {
               setAnalysisActivityPhase(p);
             }
+          }
+          if (data.type === "planning" && typeof data.text === "string") {
+            setPlanningLog((prev) => prev + data.text);
+            setAnalysisActivityPhase((cur) => (cur === "sites" ? cur : "planning"));
           }
           if (data.type === "reasoning" && typeof data.text === "string") {
             setReasoningLog((prev) => prev + data.text);
@@ -588,7 +602,8 @@ export function DecomDashboard() {
 
       if (finalAnalysis) {
         setAnalysis(finalAnalysis);
-        setReasoningLog((prev) => finalAnalysis!.llmReasoning ?? prev);
+        setPlanningLog("");
+        setReasoningLog("");
         const flaggedIds = finalAnalysis.sites
           .filter((s) => s.flagged)
           .map((s) => s.fuzeSiteId);
@@ -772,23 +787,39 @@ export function DecomDashboard() {
     invalidateAnalysis();
   };
 
+  const displayedPlanning =
+    analysis?.llmPlanning && !analysisRunning ? analysis.llmPlanning : planningLog;
+
   const displayedReasoning =
     analysis?.llmReasoning && !analysisRunning ? analysis.llmReasoning : reasoningLog;
 
   const analysisActivitySubtitle = (() => {
-    if (!analysisRunning) return "Final narrative from the last completed run.";
-    if (analysisActivityPhase === "thinking") return "Thinking — contacting the model…";
-    if (analysisActivityPhase === "reasoning")
-      return "Streaming how the model reads your data.";
+    if (!analysisRunning) return "Plan and findings from the last completed run.";
+    if (analysisActivityPhase === "thinking") return "Connecting — preparing to stream the plan…";
+    if (analysisActivityPhase === "planning")
+      return "Streaming the analysis plan (live tokens from the model)…";
+    if (analysisActivityPhase === "analyzing")
+      return "Plan complete — generating structured findings and site decisions…";
+    if (analysisActivityPhase === "reasoning") return "Streaming detailed findings…";
     if (analysisActivityPhase === "sites")
-      return "Reasoning complete — identifying site-level decisions.";
+      return "Applying decisions to each Fuze site…";
     return "Working…";
   })();
 
-  const showThinkingPlaceholder =
+  const showPlanThinkingPlaceholder =
     analysisRunning &&
-    !displayedReasoning.trim() &&
-    analysisActivityPhase !== "sites";
+    !displayedPlanning.trim() &&
+    (analysisActivityPhase === "thinking" || analysisActivityPhase === "planning");
+
+  const showFindingsSynthesizing =
+    analysisRunning &&
+    analysisActivityPhase === "analyzing" &&
+    !displayedReasoning.trim();
+
+  const showFindingsWriting =
+    analysisRunning &&
+    analysisActivityPhase === "reasoning" &&
+    !displayedReasoning.trim();
 
   const workflowProgress = Math.round((step / STEPS.length) * 100);
   const activeStep = STEPS[step - 1];
@@ -1509,7 +1540,7 @@ export function DecomDashboard() {
               </Button>
               {!analysis ? (
                 <p className="mt-2 text-xs text-muted-foreground">
-                  The model streams its reasoning, then returns structured site decisions.
+                  The model streams an analysis plan, then findings, then merges site-level decisions.
                 </p>
               ) : (
                 <p className="mt-2 text-xs text-muted-foreground">
@@ -1525,7 +1556,7 @@ export function DecomDashboard() {
             </CardContent>
           </Card>
 
-          {(analysisRunning || displayedReasoning) && (
+          {(analysisRunning || displayedPlanning || displayedReasoning) && (
             <Card className="rounded-2xl border-primary/25 bg-gradient-to-b from-primary/[0.06] via-muted/30 to-card shadow-premium">
               <CardHeader className="pb-2">
                 <div className="flex w-full items-start gap-2">
@@ -1533,7 +1564,7 @@ export function DecomDashboard() {
                     <Sparkles className="h-4 w-4 text-primary" aria-hidden />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <CardTitle className="text-sm font-medium">Model reasoning</CardTitle>
+                    <CardTitle className="text-sm font-medium">Model analysis</CardTitle>
                     <CardDescription>{analysisActivitySubtitle}</CardDescription>
                   </div>
                   {analysisRunning ? (
@@ -1545,28 +1576,64 @@ export function DecomDashboard() {
                 </div>
               </CardHeader>
               <CardContent className="space-y-3">
-                <ScrollArea className="h-[min(280px,40vh)] w-full rounded-md border border-border/80 bg-background/90 p-4">
+                <ScrollArea className="h-[min(380px,52vh)] w-full rounded-md border border-border/80 bg-background/90">
                   <div
-                    className="space-y-2"
+                    className="space-y-4 p-4"
                     role="status"
                     aria-live="polite"
                     aria-busy={analysisRunning}
                   >
-                    {showThinkingPlaceholder ? (
-                      <p
-                        className={cn(
-                          "font-mono text-sm italic text-muted-foreground",
-                          "motion-safe:animate-pulse"
-                        )}
-                      >
-                        Thinking…
-                      </p>
-                    ) : null}
-                    {displayedReasoning ? (
-                      <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-foreground/90">
-                        {displayedReasoning}
-                      </pre>
-                    ) : null}
+                    <section className="space-y-2">
+                      <h3 className="text-[11px] font-bold uppercase tracking-[0.14em] text-muted-foreground">
+                        1. Plan
+                      </h3>
+                      {showPlanThinkingPlaceholder ? (
+                        <p
+                          className={cn(
+                            "font-mono text-sm italic text-muted-foreground",
+                            "motion-safe:animate-pulse"
+                          )}
+                        >
+                          Thinking…
+                        </p>
+                      ) : null}
+                      {displayedPlanning ? (
+                        <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-foreground/90">
+                          {displayedPlanning}
+                        </pre>
+                      ) : null}
+                    </section>
+                    <Separator className="bg-border/70" />
+                    <section className="space-y-2">
+                      <h3 className="text-[11px] font-bold uppercase tracking-[0.14em] text-muted-foreground">
+                        2. Findings
+                      </h3>
+                      {showFindingsSynthesizing ? (
+                        <p
+                          className={cn(
+                            "font-mono text-sm italic text-muted-foreground",
+                            "motion-safe:animate-pulse"
+                          )}
+                        >
+                          Synthesizing structured findings from your plan…
+                        </p>
+                      ) : null}
+                      {showFindingsWriting ? (
+                        <p
+                          className={cn(
+                            "font-mono text-sm italic text-muted-foreground",
+                            "motion-safe:animate-pulse"
+                          )}
+                        >
+                          Writing findings…
+                        </p>
+                      ) : null}
+                      {displayedReasoning ? (
+                        <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-foreground/90">
+                          {displayedReasoning}
+                        </pre>
+                      ) : null}
+                    </section>
                   </div>
                 </ScrollArea>
                 {analysisRunning && analysisActivityPhase === "sites" ? (
