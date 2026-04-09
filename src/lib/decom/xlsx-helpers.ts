@@ -112,6 +112,8 @@ export function findShutdownTableInWorkbook(buffer: Buffer): {
 export function findCnsTableInWorkbook(buffer: Buffer): {
   sheetName: string;
   headerRowIndex: number;
+  /** Normalized header cells for the detected header row (for rollup / extra columns). */
+  headerLabels: string[];
   colFuze: number;
   colDate: number;
   colType: number;
@@ -151,6 +153,7 @@ export function findCnsTableInWorkbook(buffer: Buffer): {
       return {
         sheetName,
         headerRowIndex: r,
+        headerLabels: row,
         colFuze,
         colDate,
         colType,

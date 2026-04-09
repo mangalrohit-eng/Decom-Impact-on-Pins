@@ -73,6 +73,11 @@ export const EVENT_DATE_HEADERS = [
   "Ticket Date",
   "Date",
   "Open Date",
+  /** Common in EDW rollups near decom sites */
+  "RPT_DT",
+  "Report Date",
+  "RPT Date",
+  "As Of Date",
 ];
 
 export const EVENT_TYPE_HEADERS = [
@@ -165,8 +170,11 @@ export function resolveEventDateColumnIndex(cells: string[]): number {
     const c = cells[i]?.trim() ?? "";
     if (!c) continue;
     const n = normalizeHeader(c);
+    const compact = n.replace(/ /g, "");
     let s = 0;
     if (EVENT_DATE_HEADERS.some((h) => normalizeHeader(h) === n)) s = 100;
+    else if (n === "rpt dt" || compact === "rptdt") s = 96;
+    else if (n.includes("rpt") && n.includes("dt")) s = 94;
     else if (n.includes("pin") && n.includes("date")) s = 90;
     else if (n.includes("event") && n.includes("date")) s = 88;
     else if (n.includes("ticket") && n.includes("date")) s = 85;

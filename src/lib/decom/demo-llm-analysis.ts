@@ -1,5 +1,5 @@
 /**
- * Offline fallback when no OpenAI key is configured.
+ * Offline fallback when the managed generative model is not configured for this deployment.
  * Produces narrative + structured decisions from the same aggregated facts (not rule thresholds).
  */
 import type { AggregatedAnalyzeResponse } from "@/lib/decom/aggregate-windows";
@@ -40,8 +40,8 @@ export function buildDemoLlmPayload(
   const flagged = sites.filter((x) => x.flagged);
   const overview =
     flagged.length === 0
-      ? "No sites met the heuristic spike criteria in this run. Configure the production LLM service (OPENAI_API_KEY) for full generative analysis."
-      : `${flagged.length} site(s) show elevated post-decom customer signals under the heuristic engine. For full LLM reasoning, configure OPENAI_API_KEY.`;
+      ? "No sites met the heuristic spike criteria in this run. Enable the managed generative model for this deployment for full narrative analysis."
+      : `${flagged.length} site(s) show elevated post-decom customer signals under the correlation engine. Enable the managed generative model for richer reasoning.`;
   return { overview, sites };
 }
 

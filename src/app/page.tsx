@@ -324,9 +324,9 @@ export default function HomePage() {
             </h2>
             <p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted-foreground">
               Extracts must share <strong className="font-medium text-foreground">Fuze site ID</strong>.
-              Configure <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-xs">OPENAI_API_KEY</code>{" "}
-              for the managed generative service; otherwise {APP_NAME} uses the standard correlation
-              engine so sessions stay productive without the cloud model.
+              When your deployment has generative-model credentials configured, {APP_NAME} uses the
+              managed LLM path; otherwise it uses the standard correlation engine so sessions stay
+              productive without the cloud model.
             </p>
             <div className="mt-8 space-y-0">
               {FLOW_STEPS.map((item, i) => (
@@ -378,11 +378,10 @@ export default function HomePage() {
         <CardContent className="space-y-3 text-sm leading-relaxed text-muted-foreground">
           <p>
             Session processing: uploads are handled per request; persistent storage of customer data
-            in this deployment depends on your environment configuration.
-            Set <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">OPENAI_API_KEY</code>{" "}
-            (and optional <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">OPENAI_MODEL</code>
-            ) to enable the full generative path. When those credentials are absent, {APP_NAME} runs
-            the <strong className="text-foreground">standard correlation engine</strong> so analysis
+            in this deployment depends on your environment configuration. Ask your platform
+            administrator to enable the managed generative path when your tenant should use cloud
+            model reasoning. When that path is off, {APP_NAME} runs the{" "}
+            <strong className="text-foreground">standard correlation engine</strong> so analysis
             and dashboards remain available.
           </p>
           <p>

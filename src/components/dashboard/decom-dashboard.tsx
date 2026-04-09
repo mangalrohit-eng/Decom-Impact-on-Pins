@@ -280,6 +280,15 @@ function Kpi({ label, value }: { label: string; value: string }) {
   );
 }
 
+/** User-facing label for last-run line — avoids exposing vendor model IDs. */
+function displayAnalysisEngineLabel(llmModel?: string): string {
+  if (!llmModel) return "";
+  const m = llmModel.toLowerCase();
+  if (m === "heuristic-fallback" || m.includes("heuristic")) return "Correlation engine";
+  if (m.includes("vz-ne-correlation") || m.endsWith("-correlation-v1")) return "Correlation engine";
+  return "Generative model";
+}
+
 export function DecomDashboard() {
   const [step, setStep] = useState(1);
 
@@ -1169,9 +1178,9 @@ export function DecomDashboard() {
         <div className="space-y-6">
           {analysis?.demoMode ? (
             <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-950 dark:text-amber-100">
-              <strong>Heuristic analysis mode.</strong> LLM credentials are not configured (
-              <code className="rounded bg-muted px-1">OPENAI_API_KEY</code>). Output below uses the
-              on-platform fallback engine; configure the key for full generative review.
+              <strong>Correlation-engine mode.</strong> The managed generative model is not enabled
+              for this deployment. Output below uses the on-platform correlation engine; enable the
+              generative path for full narrative review.
             </div>
           ) : null}
 
@@ -1256,7 +1265,7 @@ export function DecomDashboard() {
                   {new Date(analysis.appliedConfig.analysisRunIso).toLocaleString()} ·{" "}
                   {analysis.summary.flaggedCount} site(s) flagged by the model
                   {analysis.appliedConfig.llmModel
-                    ? ` · ${analysis.appliedConfig.llmModel}`
+                    ? ` · ${displayAnalysisEngineLabel(analysis.appliedConfig.llmModel)}`
                     : ""}
                   .
                 </p>
@@ -1485,8 +1494,8 @@ export function DecomDashboard() {
               Build drafts from your validated site list (one message per NA contact). Review each
               message, then use <strong className="font-medium text-foreground">Send email</strong>{" "}
               to simulate dispatch (production mail still goes through your client per NE policy).
-              With <code className="rounded bg-muted px-1 text-xs">OPENAI_API_KEY</code> set, copy
-              is model-generated; otherwise the standard template applies.
+              When the generative path is enabled for this deployment, copy is model-generated;
+              otherwise the standard template applies.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
@@ -1512,8 +1521,8 @@ export function DecomDashboard() {
             ) : null}
             {emailsDemo ? (
               <p className="text-xs text-muted-foreground">
-                Structured template mode — set <code className="rounded bg-muted px-1">OPENAI_API_KEY</code>{" "}
-                for LLM-generated correspondence.
+                Structured template mode — enable the managed generative path for model-written
+                correspondence.
               </p>
             ) : null}
             <div className="flex flex-wrap gap-3">
