@@ -35,13 +35,22 @@ async function main() {
   if (!html.includes("mmWave") && !html.includes("Decom"))
     fail("GET / HTML missing expected content");
   if (!html.includes("Capabilities") && !html.includes("Decom impact"))
-    fail("GET / expected welcome content");
-  console.log("OK  GET / (welcome)");
+    fail("GET / expected home content");
+  console.log("OK  GET / (home)");
 
-  // --- GET /introduction ---
-  const introRes = await fetch(BASE + "/introduction");
-  if (!introRes.ok) fail(`GET /introduction status ${introRes.status}`);
-  console.log("OK  GET /introduction");
+  // --- GET /introduction (redirects to /) ---
+  const introRes = await fetch(BASE + "/introduction", { redirect: "manual" });
+  if (introRes.status !== 307 && introRes.status !== 308)
+    fail(`GET /introduction expected redirect, got ${introRes.status}`);
+  console.log("OK  GET /introduction → redirect");
+
+  // --- GET /overview ---
+  const ovRes = await fetch(BASE + "/overview");
+  if (!ovRes.ok) fail(`GET /overview status ${ovRes.status}`);
+  const ovHtml = await ovRes.text();
+  if (!ovHtml.includes("Operations dashboard") || !ovHtml.includes("Daily CNS"))
+    fail("GET /overview missing dashboard content");
+  console.log("OK  GET /overview");
 
   const dashRes = await fetch(BASE + "/dashboard");
   if (!dashRes.ok) fail(`GET /dashboard status ${dashRes.status}`);

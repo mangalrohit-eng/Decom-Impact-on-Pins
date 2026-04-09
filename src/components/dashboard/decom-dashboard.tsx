@@ -20,6 +20,7 @@ import {
   Bot,
   Building2,
   Check,
+  CheckCircle2,
   ChevronRight,
   ClipboardCheck,
   FileSpreadsheet,
@@ -32,7 +33,12 @@ import {
   Sparkles,
   UserRound,
 } from "lucide-react";
-import { getDefaultCnsEvents, getDefaultShutdowns } from "@/data/workflow-defaults";
+import {
+  CNS_FEED_SNAPSHOT,
+  DECOM_FEED_SNAPSHOT,
+  getDefaultCnsEvents,
+  getDefaultShutdowns,
+} from "@/data/workflow-defaults";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -70,9 +76,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
-import type { AnalyzeResponse, CnsEventRow, ShutdownRow } from "@/types/decom";
+import type {
+  AnalyzeResponse,
+  CnsEventRow,
+  ShutdownRow,
+  SiteAnalysisRow,
+} from "@/types/decom";
 import { PremiumDotGrid } from "@/components/visual/premium-mesh";
 
 type StepDef = {
@@ -90,19 +102,19 @@ const STEPS: StepDef[] = [
     n: 1,
     short: "Decom",
     title: "Decommissioned sites",
-    desc: "Operational feed of mmWave shutdowns — add rows or replace via upload.",
+    desc: "mmWave shutdown extract (same columns as the standard decom workbook).",
     icon: Building2,
     aiDoes: "Uses shutdown dates as anchors for pre/post windows.",
-    youDo: "Curate the decom list or upload a workbook.",
+    youDo: "Confirm the pull or replace the table with your own .xlsx.",
   },
   {
     n: 2,
     short: "CNS",
     title: "CNS / NRB signals",
-    desc: "Customer pins and tickets keyed by Fuze site ID.",
+    desc: "CNS / NRB pin extract (same columns as the standard signal workbook).",
     icon: RadioTower,
     aiDoes: "Will correlate these signals with each site’s timeline.",
-    youDo: "Maintain accurate Fuze IDs and event dates.",
+    youDo: "Confirm the pull or load your own extract.",
   },
   {
     n: 3,
@@ -126,10 +138,10 @@ const STEPS: StepDef[] = [
     n: 5,
     short: "Resolve",
     title: "Resolve outreach",
-    desc: "Draft emails grouped by NA engineer (LLM when API key is set).",
+    desc: "Reach NA engineers: review drafts, then simulate or send from your client.",
     icon: Send,
     aiDoes: "Drafts subject/body/HTML for human send.",
-    youDo: "Copy, edit, and send outside this app.",
+    youDo: "Review each recipient, then dispatch from mail per NE policy.",
   },
 ];
 
@@ -139,6 +151,45 @@ type OutreachEmail = {
   textBody: string;
   htmlBody: string;
 };
+
+type ResolveRecipientRow = OutreachEmail & {
+  displayName: string | null;
+  siteCount: number;
+};
+
+function enrichResolveRecipients(
+  emails: OutreachEmail[],
+  chosen: SiteAnalysisRow[]
+): ResolveRecipientRow[] {
+  return emails.map((em) => {
+    const isPlaceholder =
+      em.to.includes("not in decom") || em.to.includes("manually");
+    const sites = chosen.filter((s) => {
+      const eml = (s.naEngineerEmail ?? "").trim().toLowerCase();
+      if (isPlaceholder) return !eml;
+      return eml === em.to.trim().toLowerCase();
+    });
+    const displayName =
+      sites.find((s) => s.naEngineerName?.trim())?.naEngineerName ?? null;
+    return {
+      ...em,
+      displayName,
+      siteCount: sites.length,
+    };
+  });
+}
+
+function formatFeedPulled(iso: string) {
+  try {
+    return new Intl.DateTimeFormat("en-US", {
+      dateStyle: "medium",
+      timeStyle: "short",
+      timeZone: "America/New_York",
+    }).format(new Date(iso));
+  } catch {
+    return iso;
+  }
+}
 
 function hydrateShutdowns(data: {
   shutdowns: Array<{
@@ -247,10 +298,14 @@ export function DecomDashboard() {
   const [reasoningLog, setReasoningLog] = useState("");
 
   const [selectedReinstate, setSelectedReinstate] = useState<Set<string>>(new Set());
-  const [resolveEmails, setResolveEmails] = useState<OutreachEmail[] | null>(null);
+  const [resolveRecipients, setResolveRecipients] = useState<ResolveRecipientRow[] | null>(
+    null
+  );
   const [emailsLoading, setEmailsLoading] = useState(false);
   const [emailsDemo, setEmailsDemo] = useState(false);
   const [emailInfo, setEmailInfo] = useState<string | null>(null);
+  const [sentByTo, setSentByTo] = useState<Record<string, boolean>>({});
+  const [sendSuccessBanner, setSendSuccessBanner] = useState<string | null>(null);
 
   const [error, setError] = useState<string | null>(null);
 
@@ -268,10 +323,18 @@ export function DecomDashboard() {
 
   const invalidateAnalysis = useCallback(() => {
     setAnalysis(null);
-    setResolveEmails(null);
+    setResolveRecipients(null);
     setReasoningLog("");
     setEmailsDemo(false);
+    setSentByTo({});
+    setSendSuccessBanner(null);
   }, []);
+
+  useEffect(() => {
+    if (!sendSuccessBanner) return;
+    const t = window.setTimeout(() => setSendSuccessBanner(null), 9000);
+    return () => window.clearTimeout(t);
+  }, [sendSuccessBanner]);
 
   const onWindowChange = useCallback(() => {
     invalidateAnalysis();
@@ -330,9 +393,11 @@ export function DecomDashboard() {
   const runAnalysis = async () => {
     setAnalysisRunning(true);
     setError(null);
-    setResolveEmails(null);
+    setResolveRecipients(null);
     setReasoningLog("");
     setEmailsDemo(false);
+    setSentByTo({});
+    setSendSuccessBanner(null);
     try {
       const pre = Math.max(1, Math.min(365, Number(preDays) || 30));
       const post = Math.max(1, Math.min(365, Number(postDays) || 30));
@@ -449,7 +514,7 @@ export function DecomDashboard() {
     );
     if (chosen.length === 0) {
       setError("Select at least one flagged site for reinstatement outreach.");
-      setResolveEmails(null);
+      setResolveRecipients(null);
       return;
     }
     setError(null);
@@ -474,12 +539,14 @@ export function DecomDashboard() {
       if (!data.emails?.length) {
         throw new Error("No emails returned.");
       }
-      setResolveEmails(data.emails);
+      setSentByTo({});
+      setSendSuccessBanner(null);
+      setResolveRecipients(enrichResolveRecipients(data.emails, chosen));
       setEmailsDemo(Boolean(data.demoMode));
       setEmailInfo(data.warning ?? null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Email generation failed.");
-      setResolveEmails(null);
+      setResolveRecipients(null);
     } finally {
       setEmailsLoading(false);
     }
@@ -491,6 +558,13 @@ export function DecomDashboard() {
     } catch {
       /* ignore */
     }
+  };
+
+  const simulateEmailSend = (recipientKey: string, displayLabel: string) => {
+    setSentByTo((prev) => ({ ...prev, [recipientKey]: true }));
+    setSendSuccessBanner(
+      `Simulated send succeeded — delivery queued for ${displayLabel}. No message was transmitted from this application.`
+    );
   };
 
   const goNext = () => setStep((s) => Math.min(5, s + 1));
@@ -580,10 +654,10 @@ export function DecomDashboard() {
                 LLM-supported interpretation, prioritization, and outreach composition — with analysts
                 validating every escalation.{" "}
                 <Link
-                  href="/introduction"
+                  href="/"
                   className="font-semibold text-primary underline-offset-4 hover:underline"
                 >
-                  Product overview
+                  Home &amp; guide
                 </Link>
               </p>
             </div>
@@ -728,19 +802,36 @@ export function DecomDashboard() {
                       className="mr-1.5 inline-block h-2 w-2 rounded-full bg-emerald-500"
                       aria-hidden
                     />
-                    Operational data
+                    {decomFileName ? "Uploaded workbook" : "Inventory sync"}
                   </Badge>
                   <Badge variant="outline" className="font-mono text-xs font-normal">
                     {shutdowns.length} sites
                   </Badge>
                 </div>
-                <CardDescription>
+                <CardDescription className="space-y-1.5 text-sm leading-relaxed">
                   {decomFileName ? (
                     <span className="font-medium text-foreground">
-                      Loaded file: {decomFileName}
+                      Working set replaced by{" "}
+                      <span className="font-mono text-xs">{decomFileName}</span>. Column layout
+                      matches the standard decom workbook (Fuze Site ID, Shutdown Date, NA Engineer
+                      Email, NA Engineer Name).
                     </span>
                   ) : (
-                    "Reference extract loaded — replace with your file or append rows."
+                    <>
+                      <span className="block text-foreground">
+                        {DECOM_FEED_SNAPSHOT.sourceLabel} — job{" "}
+                        <span className="font-mono text-xs">{DECOM_FEED_SNAPSHOT.syncJobId}</span>
+                        , last pulled{" "}
+                        <span className="whitespace-nowrap font-medium">
+                          {formatFeedPulled(DECOM_FEED_SNAPSHOT.pulledAtIso)}
+                        </span>{" "}
+                        ET.
+                      </span>
+                      <span className="block text-xs text-muted-foreground">
+                        Rows below use the same fields as the decom .xlsx template. Upload a
+                        workbook to replace this sync; add row appends to the current set.
+                      </span>
+                    </>
                   )}
                 </CardDescription>
               </div>
@@ -763,7 +854,7 @@ export function DecomDashboard() {
                           id="nd-id"
                           value={newDecomId}
                           onChange={(e) => setNewDecomId(e.target.value)}
-                          placeholder="FZ-NAM-099"
+                          placeholder="FZ-204912"
                           className="font-mono"
                         />
                       </div>
@@ -826,7 +917,7 @@ export function DecomDashboard() {
                   }}
                 >
                   <RotateCcw className="h-4 w-4" aria-hidden />
-                  Reset feed
+                  Restore sync pull
                 </Button>
               </div>
             </div>
@@ -842,9 +933,10 @@ export function DecomDashboard() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Fuze site ID</TableHead>
-                    <TableHead>Shutdown date</TableHead>
-                    <TableHead>NA engineer</TableHead>
+                    <TableHead>Fuze Site ID</TableHead>
+                    <TableHead>Shutdown Date</TableHead>
+                    <TableHead>NA Engineer Email</TableHead>
+                    <TableHead>NA Engineer Name</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -854,8 +946,11 @@ export function DecomDashboard() {
                       <TableCell className="text-xs">
                         {r.shutdownDate.toISOString().slice(0, 10)}
                       </TableCell>
-                      <TableCell className="max-w-[220px] truncate text-xs">
-                        {r.naEngineerEmail ?? r.naEngineerName ?? "—"}
+                      <TableCell className="max-w-[200px] truncate font-mono text-xs">
+                        {r.naEngineerEmail ?? "—"}
+                      </TableCell>
+                      <TableCell className="max-w-[160px] truncate text-xs">
+                        {r.naEngineerName ?? "—"}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -881,19 +976,35 @@ export function DecomDashboard() {
                       className="mr-1.5 inline-block h-2 w-2 rounded-full bg-sky-500"
                       aria-hidden
                     />
-                    Operational data
+                    {cnsFileName ? "Uploaded workbook" : "Warehouse sync"}
                   </Badge>
                   <Badge variant="outline" className="font-mono text-xs font-normal">
                     {events.length} rows
                   </Badge>
                 </div>
-                <CardDescription>
+                <CardDescription className="space-y-1.5 text-sm leading-relaxed">
                   {cnsFileName ? (
                     <span className="font-medium text-foreground">
-                      Loaded file: {cnsFileName}
+                      Working set replaced by{" "}
+                      <span className="font-mono text-xs">{cnsFileName}</span>. Column layout
+                      matches the standard CNS workbook (Fuze Site ID, Pin Date, Type, Pin ID).
                     </span>
                   ) : (
-                    "Reference signal history per site — upload replaces the working set or add rows."
+                    <>
+                      <span className="block text-foreground">
+                        {CNS_FEED_SNAPSHOT.sourceLabel} — job{" "}
+                        <span className="font-mono text-xs">{CNS_FEED_SNAPSHOT.syncJobId}</span>
+                        , last pulled{" "}
+                        <span className="whitespace-nowrap font-medium">
+                          {formatFeedPulled(CNS_FEED_SNAPSHOT.pulledAtIso)}
+                        </span>{" "}
+                        ET.
+                      </span>
+                      <span className="block text-xs text-muted-foreground">
+                        Rows mirror the CNS / NRB .xlsx extract. Upload your file to replace this
+                        pull; add row appends to the current set.
+                      </span>
+                    </>
                   )}
                 </CardDescription>
               </div>
@@ -916,12 +1027,12 @@ export function DecomDashboard() {
                           id="nc-fuze"
                           value={newCnsFuze}
                           onChange={(e) => setNewCnsFuze(e.target.value)}
-                          placeholder="FZ-NAM-001"
+                          placeholder="FZ-204881"
                           className="font-mono"
                         />
                       </div>
                       <div className="space-y-2">
-                        <Label htmlFor="nc-date">Event date</Label>
+                        <Label htmlFor="nc-date">Pin date</Label>
                         <Input
                           id="nc-date"
                           type="date"
@@ -945,7 +1056,7 @@ export function DecomDashboard() {
                         </Select>
                       </div>
                       <div className="space-y-2">
-                        <Label htmlFor="nc-ext">External ID (optional)</Label>
+                        <Label htmlFor="nc-ext">Pin ID (optional)</Label>
                         <Input
                           id="nc-ext"
                           value={newCnsExtId}
@@ -985,7 +1096,7 @@ export function DecomDashboard() {
                   }}
                 >
                   <RotateCcw className="h-4 w-4" aria-hidden />
-                  Reset feed
+                  Restore sync pull
                 </Button>
               </div>
             </div>
@@ -1001,10 +1112,10 @@ export function DecomDashboard() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Fuze site ID</TableHead>
-                    <TableHead>Event date</TableHead>
+                    <TableHead>Fuze Site ID</TableHead>
+                    <TableHead>Pin Date</TableHead>
                     <TableHead>Type</TableHead>
-                    <TableHead>Id</TableHead>
+                    <TableHead>Pin ID</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -1338,19 +1449,33 @@ export function DecomDashboard() {
             <div className="flex flex-wrap items-center gap-2">
               <CardTitle className="flex items-center gap-2 text-base">
                 <Send className="h-4 w-4" aria-hidden />
-                Resolve — AI outreach drafts
+                Resolve — NA outreach
               </CardTitle>
               <Badge variant="secondary" className="text-[10px] font-normal">
                 Action step
               </Badge>
             </div>
             <CardDescription>
-              Compose draft messages for NA distribution from your validated site list (grouped by
-              engineer). With <code className="rounded bg-muted px-1 text-xs">OPENAI_API_KEY</code>{" "}
-              set, copy is model-generated; otherwise the standard structured template is used.
+              Build drafts from your validated site list (one message per NA contact). Review each
+              message, then use <strong className="font-medium text-foreground">Send email</strong>{" "}
+              to simulate dispatch (production mail still goes through your client per NE policy).
+              With <code className="rounded bg-muted px-1 text-xs">OPENAI_API_KEY</code> set, copy
+              is model-generated; otherwise the standard template applies.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
+            {sendSuccessBanner ? (
+              <div
+                className="flex items-start gap-3 rounded-lg border border-emerald-500/35 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-950 dark:text-emerald-50"
+                role="status"
+              >
+                <CheckCircle2
+                  className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400"
+                  aria-hidden
+                />
+                <span>{sendSuccessBanner}</span>
+              </div>
+            ) : null}
             {emailInfo ? (
               <div
                 className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground"
@@ -1377,54 +1502,130 @@ export function DecomDashboard() {
                 ) : (
                   <Mail className="h-4 w-4" aria-hidden />
                 )}
-                Generate AI outreach drafts
+                Generate outreach drafts
               </Button>
               <p className="w-full text-xs text-muted-foreground">
-                {selectedReinstate.size} site(s) selected — you copy and send outside this app.
+                {selectedReinstate.size} site(s) selected for this run.
               </p>
             </div>
           </CardContent>
-          {resolveEmails && resolveEmails.length > 0 && (
-            <CardContent className="space-y-6 border-t border-border pt-6">
-              {resolveEmails.map((em, idx) => (
-                <div
-                  key={idx}
-                  className="space-y-2 rounded-md border border-border p-4"
-                >
-                  <p className="text-xs font-medium text-muted-foreground">To</p>
-                  <p className="font-mono text-sm">{em.to}</p>
-                  <p className="text-xs font-medium text-muted-foreground">Subject</p>
-                  <p className="text-sm">{em.subject}</p>
-                  <div className="flex flex-wrap gap-2 pt-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => copyText(em.textBody)}
+          {resolveRecipients && resolveRecipients.length > 0 && (
+            <CardContent className="space-y-4 border-t border-border pt-6">
+              <p className="text-sm font-medium text-foreground">Recipients</p>
+              <ul className="space-y-3" role="list">
+                {resolveRecipients.map((em, idx) => {
+                  const sent = Boolean(sentByTo[em.to]);
+                  const label = em.displayName
+                    ? `${em.displayName} · ${em.to}`
+                    : em.to;
+                  return (
+                    <li
+                      key={`${em.to}-${idx}`}
+                      className="flex flex-col gap-3 rounded-xl border border-border/80 bg-card/50 p-4 sm:flex-row sm:items-center sm:justify-between"
                     >
-                      Copy plain text
-                    </Button>
-                    <Dialog>
-                      <DialogTrigger asChild>
-                        <Button type="button" variant="outline" size="sm">
-                          View HTML
-                        </Button>
-                      </DialogTrigger>
-                      <DialogContent className="max-h-[85vh] max-w-3xl">
-                        <DialogHeader>
-                          <DialogTitle>HTML preview</DialogTitle>
-                        </DialogHeader>
-                        <ScrollArea className="max-h-[60vh] rounded-md border border-border p-3">
-                          <div
-                            className="prose prose-sm max-w-none dark:prose-invert"
-                            dangerouslySetInnerHTML={{ __html: em.htmlBody }}
-                          />
-                        </ScrollArea>
-                      </DialogContent>
-                    </Dialog>
-                  </div>
-                </div>
-              ))}
+                      <div className="flex min-w-0 flex-1 items-start gap-3">
+                        <div
+                          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary"
+                          aria-hidden
+                        >
+                          {(em.displayName ?? em.to).slice(0, 2).toUpperCase()}
+                        </div>
+                        <div className="min-w-0 space-y-1">
+                          <p className="truncate font-medium text-foreground">
+                            {em.displayName ?? "NA engineer"}
+                          </p>
+                          <p className="truncate font-mono text-xs text-muted-foreground">
+                            {em.to}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {em.siteCount} site{em.siteCount === 1 ? "" : "s"} in this draft
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-2 sm:justify-end">
+                        <Dialog>
+                          <DialogTrigger asChild>
+                            <Button type="button" variant="outline" size="sm">
+                              Review email
+                            </Button>
+                          </DialogTrigger>
+                          <DialogContent className="max-h-[90vh] max-w-2xl gap-0 p-0">
+                            <DialogHeader className="border-b border-border px-6 py-4 text-left">
+                              <DialogTitle className="text-base">Draft message</DialogTitle>
+                              <p className="pt-1 font-mono text-xs text-muted-foreground">{em.to}</p>
+                            </DialogHeader>
+                            <div className="px-6 py-4">
+                              <p className="text-xs font-medium text-muted-foreground">Subject</p>
+                              <p className="pb-4 text-sm">{em.subject}</p>
+                              <Tabs defaultValue="text" className="w-full">
+                                <TabsList className="mb-3 w-full justify-start">
+                                  <TabsTrigger value="text">Plain text</TabsTrigger>
+                                  <TabsTrigger value="html">HTML</TabsTrigger>
+                                </TabsList>
+                                <TabsContent value="text" className="mt-0">
+                                  <ScrollArea className="h-[min(320px,40vh)] rounded-md border border-border p-3">
+                                    <pre className="whitespace-pre-wrap font-sans text-xs leading-relaxed">
+                                      {em.textBody}
+                                    </pre>
+                                  </ScrollArea>
+                                </TabsContent>
+                                <TabsContent value="html" className="mt-0">
+                                  <ScrollArea className="h-[min(320px,40vh)] rounded-md border border-border p-3">
+                                    <div
+                                      className="prose prose-sm max-w-none dark:prose-invert"
+                                      dangerouslySetInnerHTML={{ __html: em.htmlBody }}
+                                    />
+                                  </ScrollArea>
+                                </TabsContent>
+                              </Tabs>
+                            </div>
+                            <DialogFooter className="border-t border-border px-6 py-4">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => void copyText(em.textBody)}
+                              >
+                                Copy plain text
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => void copyText(em.htmlBody)}
+                              >
+                                Copy HTML
+                              </Button>
+                            </DialogFooter>
+                          </DialogContent>
+                        </Dialog>
+                        {sent ? (
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            disabled
+                            className="pointer-events-none gap-1.5"
+                          >
+                            <CheckCircle2 className="h-4 w-4 text-emerald-600" aria-hidden />
+                            Sent (simulated)
+                          </Button>
+                        ) : (
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="gap-1.5"
+                            onClick={() => simulateEmailSend(em.to, label)}
+                          >
+                            <Send className="h-4 w-4" aria-hidden />
+                            Send email
+                          </Button>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
             </CardContent>
           )}
         </Card>

@@ -44,11 +44,12 @@ export const SHUTDOWN_DATE_HEADERS = [
   "mmWave Shutdown Date",
   "Decom Date",
   "Decommission Date",
-  "Shutdown",
+  /** Omit bare "Shutdown" — workbooks often use it for a Y/N flag next to a "Date" column. */
   "Actual Shutdown Date",
   "Target Shutdown Date",
   "Off Air Date",
   "Decom Complete Date",
+  /** Last-column style headers in mmWave shutdown extracts */
   "Date",
 ];
 
@@ -132,8 +133,12 @@ export function resolveShutdownDateColumnIndex(cells: string[]): number {
     else if (n.includes("mmwave") && n.includes("date")) s = 90;
     else if (n.includes("decom") && n.includes("date")) s = 88;
     else if (n.includes("off air")) s = 85;
+    /** Bare "Shutdown" / "SHUTDOWN" is often a yes-no flag, not the calendar column. */
+    else if (n === "shutdown") s = 28;
     else if (n.includes("shutdown")) s = 75;
     else if (n.includes("decom") || n.includes("decommission")) s = 72;
+    /** Plain "Date" is a strong signal when the sheet has several columns (tabular export). */
+    else if (n === "date" && cells.filter((x) => x?.trim()).length >= 3) s = 65;
     else if (n === "date" && cells.filter((x) => x?.trim()).length >= 2) s = 40;
     else if (dateLike(n) && n !== "update date") s = 35;
     if (s > bestS) {

@@ -5,15 +5,14 @@ import { ChevronRight, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const CRUMBS: Record<string, { segment: string; title: string }> = {
-  "/": { segment: "Home", title: "Welcome" },
-  "/introduction": { segment: "Overview", title: "Product overview" },
+  "/": { segment: "Home", title: "Guide & capabilities" },
+  "/overview": { segment: "Operations", title: "Dashboard" },
   "/dashboard": { segment: "Operations", title: "Decom & CNS analysis" },
 };
 
 function crumbKey(pathname: string): keyof typeof CRUMBS {
   if (pathname.startsWith("/dashboard")) return "/dashboard";
-  if (pathname === "/introduction" || pathname.startsWith("/introduction/"))
-    return "/introduction";
+  if (pathname.startsWith("/overview")) return "/overview";
   return "/";
 }
 

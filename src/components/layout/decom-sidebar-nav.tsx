@@ -2,28 +2,28 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BookOpen, Home, Sparkles } from "lucide-react";
+import { BarChart3, Home, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const items = [
   {
     href: "/",
-    label: "Welcome",
-    hint: "What this app does",
+    label: "Home",
+    hint: "Guide & capabilities",
     icon: Home,
     match: (p: string) => p === "/",
   },
   {
-    href: "/introduction",
-    label: "Product overview",
-    hint: "Workflow & capabilities",
-    icon: BookOpen,
-    match: (p: string) => p === "/introduction" || p.startsWith("/introduction/"),
+    href: "/overview",
+    label: "Dashboard",
+    hint: "Pins, decom & regions",
+    icon: BarChart3,
+    match: (p: string) => p === "/overview" || p.startsWith("/overview/"),
   },
   {
     href: "/dashboard",
     label: "Analysis",
-    hint: "Decom & CNS",
+    hint: "Guided workflow",
     icon: Sparkles,
     match: (p: string) => p === "/dashboard" || p.startsWith("/dashboard/"),
   },

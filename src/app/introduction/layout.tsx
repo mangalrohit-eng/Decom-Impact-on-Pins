@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Product overview · Decom & CNS impact | Verizon Wireless NE",
+  title: "Overview (redirect) · Decom & CNS impact | Verizon Wireless NE",
   description:
-    "End-to-end workflow: data preparation, LLM analysis of customer signals around mmWave decommissions, human validation, and structured NA outreach drafts.",
+    "This path redirects to the consolidated home page. Use Home for the full guide and Dashboard for metrics.",
 };
 
 export default function IntroductionLayout({

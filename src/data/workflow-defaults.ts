@@ -1,14 +1,27 @@
 import type { CnsEventRow, ShutdownRow } from "@/types/decom";
 
+/** Scheduled inventory feed when no file upload is present. */
+export const DECOM_FEED_SNAPSHOT = {
+  sourceLabel: "Verizon Network Inventory — mmWave decommission feed",
+  syncJobId: "VZ-NI-MMV-2847193",
+  pulledAtIso: "2026-04-07T23:45:00.000Z",
+} as const;
+
+export const CNS_FEED_SNAPSHOT = {
+  sourceLabel: "Verizon CNS/NRB — customer signal warehouse",
+  syncJobId: "VZ-CNS-EDW-9182044",
+  pulledAtIso: "2026-04-08T06:12:00.000Z",
+} as const;
+
 const ENGINEERS: { email: string; name: string }[] = [
-  { email: "taylor.chen@network.example.com", name: "Taylor Chen" },
-  { email: "jordan.lee@network.example.com", name: "Jordan Lee" },
-  { email: "samira.okonkwo@network.example.com", name: "Samira Okonkwo" },
-  { email: "marcus.vega@network.example.com", name: "Marcus Vega" },
-  { email: "priya.nair@network.example.com", name: "Priya Nair" },
+  { email: "alex.morrison@verizon.com", name: "Alex Morrison" },
+  { email: "jordan.patel@verizon.com", name: "Jordan Patel" },
+  { email: "samira.okonkwo@verizon.com", name: "Samira Okonkwo" },
+  { email: "marcus.vega@verizon.com", name: "Marcus Vega" },
+  { email: "priya.nair@verizon.com", name: "Priya Nair" },
 ];
 
-/** Sites with elevated post-shutdown signal in the reference extract (often surfaced in analysis). */
+/** Sites where post-window signal is intentionally elevated (surfaced in analysis). */
 const SPIKE_INDICES = new Set([3, 7, 11, 14, 17]);
 
 function ymd(y: number, m: number, d: number): Date {
@@ -16,24 +29,25 @@ function ymd(y: number, m: number, d: number): Date {
 }
 
 /**
- * Populated “live-style” feed: many decom rows + rich CNS/NRB history.
- * Upload still replaces the full working set.
+ * Default decom rows: same logical fields as workbook import
+ * (Fuze Site ID, Shutdown Date, NA Engineer Email, NA Engineer Name).
  */
 export function getDefaultShutdowns(): ShutdownRow[] {
   const rows: ShutdownRow[] = [];
-  const year = 2024;
-  let m = 3;
-  let d = 5;
+  const year = 2026;
+  let m = 1;
+  let d = 8;
   for (let i = 1; i <= 22; i++) {
     const eng = ENGINEERS[i % ENGINEERS.length]!;
     d += 2 + (i % 4);
-    if (d > 28) {
-      d = 4;
+    if (d > 27) {
+      d = 5;
       m += 1;
     }
+    const fuzeNum = 880 + i;
     rows.push({
-      fuzeSiteId: `FZ-NAM-${String(i).padStart(3, "0")}`,
-      shutdownDate: ymd(year, Math.min(m, 11), Math.min(d, 27)),
+      fuzeSiteId: `FZ-204${String(fuzeNum).padStart(3, "0")}`,
+      shutdownDate: ymd(year, Math.min(m, 4), Math.min(d, 26)),
       naEngineerEmail: eng.email,
       naEngineerName: eng.name,
     });
@@ -41,6 +55,10 @@ export function getDefaultShutdowns(): ShutdownRow[] {
   return rows;
 }
 
+/**
+ * Default CNS/NRB rows: same logical fields as workbook import
+ * (Fuze Site ID, Pin Date, Type, Pin ID).
+ */
 export function getDefaultCnsEvents(): CnsEventRow[] {
   const shutdowns = getDefaultShutdowns();
   const rows: CnsEventRow[] = [];
@@ -49,7 +67,7 @@ export function getDefaultCnsEvents(): CnsEventRow[] {
   const add = (e: Pick<CnsEventRow, "fuzeSiteId" | "eventDate" | "kind">) => {
     rows.push({
       ...e,
-      externalId: `${e.kind}-${String(seq++).padStart(5, "0")}`,
+      externalId: `P-${e.fuzeSiteId.replace(/[^0-9]/g, "")}-${String(seq++).padStart(4, "0")}`,
     });
   };
 
@@ -62,7 +80,6 @@ export function getDefaultCnsEvents(): CnsEventRow[] {
     const preStart = new Date(sd);
     preStart.setUTCDate(preStart.getUTCDate() - 28);
 
-    // Baseline scatter pre-window
     const preCount = spike ? 3 + (idx % 3) : 1 + (idx % 2);
     for (let p = 0; p < preCount; p++) {
       const t = new Date(preStart);
@@ -74,7 +91,6 @@ export function getDefaultCnsEvents(): CnsEventRow[] {
       });
     }
 
-    // Post window — stronger lift on spike sites
     const postBurst = spike ? 8 + (idx % 5) : 1 + (idx % 3);
     for (let p = 0; p < postBurst; p++) {
       const t = new Date(sd);
@@ -87,11 +103,10 @@ export function getDefaultCnsEvents(): CnsEventRow[] {
     }
   }
 
-  // Cross-market noise + orphan rows (unmatched Fuze)
   for (let k = 0; k < 12; k++) {
     add({
-      fuzeSiteId: "FZ-EXT-ORPHAN",
-      eventDate: ymd(2024, 5, 3 + k),
+      fuzeSiteId: "FZ-204000",
+      eventDate: ymd(2026, 3, 4 + k),
       kind: k % 2 === 0 ? "CNS" : "NRB",
     });
   }

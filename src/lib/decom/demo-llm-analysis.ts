@@ -5,7 +5,8 @@
 import type { AggregatedAnalyzeResponse } from "@/lib/decom/aggregate-windows";
 import type { LlmAnalysisPayload } from "@/lib/decom/merge-llm-analysis";
 
-function demoFlagSite(s: {
+/** Shared with operations dashboard KPIs — heuristic spike / reinstatement candidate. */
+export function heuristicSpikeCandidate(s: {
   preTotal: number;
   postTotal: number;
 }): boolean {
@@ -26,7 +27,7 @@ export function buildDemoLlmPayload(
   agg: AggregatedAnalyzeResponse
 ): LlmAnalysisPayload {
   const sites = agg.sites.map((s) => {
-    const flagged = demoFlagSite(s);
+    const flagged = heuristicSpikeCandidate(s);
     return {
       fuzeSiteId: s.fuzeSiteId,
       flagged,
